@@ -17,4 +17,4 @@ features = ["cortex-m"]
 [dependencies.stm32f4xx-hal]
 git = "https://github.com/stm32-rs/stm32f4xx-hal.git"
 commit = "9bbdac81025292de2a1ba02ca3e60cbedcb70c8c"
-features = ["stm32f446"]
+features = ["stm32f446", "rt"]
