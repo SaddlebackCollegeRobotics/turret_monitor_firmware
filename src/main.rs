@@ -9,12 +9,13 @@ mod tim8;
 mod app {
     use crate::tim8::tim8_cc;
     use rtt_target::{rprintln, rtt_init_print};
-    use stm32f4xx_hal::gpio::gpioc::PC6;
-    use stm32f4xx_hal::gpio::Alternate;
-    use stm32f4xx_hal::prelude::*;
-    use stm32f4xx_hal::pwm_input::PwmInput;
-    use stm32f4xx_hal::stm32::TIM8;
-    use stm32f4xx_hal::timer::Timer;
+    use stm32f4xx_hal::{
+        gpio::{gpioc::PC6, Alternate},
+        prelude::*,
+        pwm_input::PwmInput,
+        stm32::TIM8,
+        timer::Timer,
+    };
 
     pub(crate) type PwmMonitor = PwmInput<TIM8, PC6<Alternate<3>>>;
     #[shared]
@@ -61,8 +62,8 @@ mod app {
         )
     }
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
-    // This allows us to specify the handlers in other modules and still work as RTIC interrupt
-    // handlers.
+    // This allows us to specify the interrupt handlers in other modules and still work within
+    // RTIC's infrastructure.
     extern "Rust" {
         #[task(binds=TIM8_CC, local=[monitor], shared=[last_observed_turret_position])]
         fn tim8_cc(context: tim8_cc::Context);
