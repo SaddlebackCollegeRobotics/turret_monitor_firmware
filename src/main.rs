@@ -14,6 +14,8 @@ mod app {
     use stm32f4xx_hal::stm32::TIM8;
     use stm32f4xx_hal::gpio::gpioc::PC6;
     use stm32f4xx_hal::gpio::Alternate;
+    use rtt_target::{rprintln, rtt_init_print};
+
 
     pub(crate) type PwmMonitor = PwmInput<TIM8, PC6<Alternate<3>>>;
     #[shared]
@@ -29,6 +31,9 @@ mod app {
 
     #[init]
     fn init(ctx: init::Context) -> (Shared, Local, init::Monotonics) {
+        // Enable RTT logging
+        rtt_init_print!();
+        rprintln!("hello, world!");
         // retrieve the RCC register, which is needed to obtain a handle to the clocks
         let rcc = ctx.device.RCC.constrain();
         // then retreive the clocks, so we can configure timers later on
