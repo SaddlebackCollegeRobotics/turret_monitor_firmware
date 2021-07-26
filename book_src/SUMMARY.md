@@ -5,3 +5,4 @@
 - [Communications interface](interface.md)
 - [Implementation details](implementation_details/index.md)
      - [extern "rust"](implementation_details/extern_rust.md)
+     - [why RTIC](implementation_details/rtic.md)
