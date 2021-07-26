@@ -1,0 +1,12 @@
+[default.general]
+chip = "STM32F446RETx"
+
+[default.rtt]
+enabled = true
+
+
+[release.general]
+chip = "STM32F446RETx"
+
+[release.rtt]
+enabled = false

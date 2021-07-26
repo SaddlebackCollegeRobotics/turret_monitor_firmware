@@ -1,0 +1,20 @@
+[package]
+name = "turret_firmware"
+version = "0.1.0"
+authors = ["Joshua Salzedo <thhunkn0wnd@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+cortex-m-rtic = "0.6.0-alpha.5"
+rtt-target = "0.3.1"
+
+[dependencies.panic-rtt-target]
+version = "0.1.2"
+features = ["cortex-m"]
+
+[dependencies.stm32f4xx-hal]
+git = "https://github.com/stm32-rs/stm32f4xx-hal.git"
+commit = "9bbdac81025292de2a1ba02ca3e60cbedcb70c8c"
+features = ["stm32f446"]
