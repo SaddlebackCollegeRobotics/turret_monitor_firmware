@@ -19,11 +19,12 @@ mod app {
 
     #[shared]
     struct Shared {
-        monitor: PwmMonitor,
     }
 
     #[local]
-    struct Local {}
+    struct Local {
+        monitor: PwmMonitor,
+    }
 
     #[init]
     fn init(ctx: init::Context) -> (Shared, Local, init::Monotonics) {
@@ -47,7 +48,9 @@ mod app {
 
         // lastly return the shared and local resources, as per RTIC's spec.
             (Shared {
+
+            }, Local {
                 monitor
-            }, Local {}, init::Monotonics())
+            }, init::Monotonics())
     }
 }
