@@ -8,20 +8,19 @@ mod tim8;
 #[rtic::app(device = stm32f4xx_hal::stm32, peripherals = true)]
 mod app {
     use crate::tim8::tim8_cc;
-    use stm32f4xx_hal::prelude::*;
-    use stm32f4xx_hal::timer::Timer;
-    use stm32f4xx_hal::pwm_input::PwmInput;
-    use stm32f4xx_hal::stm32::TIM8;
+    use rtt_target::{rprintln, rtt_init_print};
     use stm32f4xx_hal::gpio::gpioc::PC6;
     use stm32f4xx_hal::gpio::Alternate;
-    use rtt_target::{rprintln, rtt_init_print};
-
+    use stm32f4xx_hal::prelude::*;
+    use stm32f4xx_hal::pwm_input::PwmInput;
+    use stm32f4xx_hal::stm32::TIM8;
+    use stm32f4xx_hal::timer::Timer;
 
     pub(crate) type PwmMonitor = PwmInput<TIM8, PC6<Alternate<3>>>;
     #[shared]
     struct Shared {
         /// the last observed position of the turret
-        last_observed_turret_position: f32
+        last_observed_turret_position: f32,
     }
 
     #[local]
@@ -39,13 +38,12 @@ mod app {
         // then retreive the clocks, so we can configure timers later on
         let clocks = rcc.cfgr.freeze();
 
-
         // obtain a reference to the GPIOC register block, so we can configure pins on the PC bus.
         let gpioc = ctx.device.GPIOC.split();
 
         // Configure one of TIM8's CH1 pins, so that its attached to the peripheral.
         // We need to do this since the pins are multiplexed across multiple peripherals
-        let tim8_cc1 =gpioc.pc6.into_alternate();
+        let tim8_cc1 = gpioc.pc6.into_alternate();
 
         // Configure TIM8 into PWM input mode.
         // This requires a "best guess" of the input frequency in order to be accurate.
@@ -54,11 +52,13 @@ mod app {
         let monitor = Timer::new(ctx.device.TIM8, &clocks).pwm_input(240.hz(), tim8_cc1);
 
         // lastly return the shared and local resources, as per RTIC's spec.
-            (Shared {
+        (
+            Shared {
                 last_observed_turret_position: 0.0,
-            }, Local {
-                monitor
-            }, init::Monotonics())
+            },
+            Local { monitor },
+            init::Monotonics(),
+        )
     }
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
     // This allows us to specify the handlers in other modules and still work as RTIC interrupt
