@@ -7,6 +7,7 @@ use panic_rtt_target as _panic_handler;
 
 /* declare a submodule for handling tim8 interrupts */
 mod tim8;
+
 /* declare the RTIC application itself */
 #[rtic::app(device = stm32f4xx_hal::stm32, peripherals = true)]
 mod app {
