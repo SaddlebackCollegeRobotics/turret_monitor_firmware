@@ -4,10 +4,14 @@
 #![allow(unused_imports)]
 
 use panic_rtt_target as _panic_handler;
+
+/* declare a submodule for handling tim8 interrupts */
 mod tim8;
+/* declare the RTIC application itself */
 #[rtic::app(device = stm32f4xx_hal::stm32, peripherals = true)]
 mod app {
-    use crate::tim8::tim8_cc;
+
+    /* bring dependencies into scope */
     use rtt_target::{rprintln, rtt_init_print};
     use stm32f4xx_hal::{
         gpio::{gpioc::PC6, Alternate},
@@ -16,14 +20,17 @@ mod app {
         stm32::TIM8,
         timer::Timer,
     };
-
+    /// PWM input monitor type
     pub(crate) type PwmMonitor = PwmInput<TIM8, PC6<Alternate<3>>>;
+
+    /* resources shared across RTIC tasks */
     #[shared]
     struct Shared {
         /// the last observed position of the turret
         last_observed_turret_position: f32,
     }
 
+    /* resources local to specific RTIC tasks */
     #[local]
     struct Local {
         monitor: PwmMonitor,
@@ -61,6 +68,10 @@ mod app {
             init::Monotonics(),
         )
     }
+
+    /* bring tim8's interrupt handler into scope */
+    use crate::tim8::tim8_cc;
+
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
     // This allows us to specify the interrupt handlers in other modules and still work within
     // RTIC's infrastructure.
