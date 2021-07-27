@@ -12,7 +12,7 @@ In `main.rs`, you may observe like this
 ```
 
 ## What is `extern "Rust"` doing here?`
-Basically, this is a prototype using C++ terminology. We are declaring to RustC that a 
+Basically, this is a prototype using C++ terminology. We are declaring to the rust compiler that a 
 function with this signature *exists*.  The actual implementation exists somewhere else.
 
 This allows us to define the implementation of the function in another module, 
