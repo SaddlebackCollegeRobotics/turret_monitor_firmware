@@ -74,7 +74,7 @@ mod app {
     use crate::tim8::tim8_cc;
 
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
-    // This allows us to specify the interrupt handlers in other modules and still work within
+    // This allows us to specify the tasks in other modules and still work within
     // RTIC's infrastructure.
     extern "Rust" {
         #[task(binds=TIM8_CC, local=[monitor], shared=[last_observed_turret_position])]
