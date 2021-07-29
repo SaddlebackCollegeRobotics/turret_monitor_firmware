@@ -9,14 +9,14 @@ use panic_rtt_target as _panic_handler;
 mod tasks;
 
 /*
-  Declare the RTIC application itself.
-  Firstly, we must provide it with the path to the device's PAC.
-    - most HALs provide this as their `{hal}::stm32` module.
-  We also want the device's peripherals, so we request those.
-    - RTIC will provde these on the Context object of init.
-  Lastly, we want to use some "software tasks", so we need to donate some unused interrupts to RTIC.
-   - this is done via the `dispatchers` argument
- */
+ Declare the RTIC application itself.
+ Firstly, we must provide it with the path to the device's PAC.
+   - most HALs provide this as their `{hal}::stm32` module.
+ We also want the device's peripherals, so we request those.
+   - RTIC will provde these on the Context object of init.
+ Lastly, we want to use some "software tasks", so we need to donate some unused interrupts to RTIC.
+  - this is done via the `dispatchers` argument
+*/
 #[rtic::app(
     device = stm32f4xx_hal::stm32,
     peripherals = true,
@@ -27,7 +27,10 @@ mod app {
     use rtic::time::duration::Seconds;
     use rtt_target::{rprintln, rtt_init_print};
     use stm32f4xx_hal::{
-        gpio::{Alternate, gpioc::{PC10, PC11, PC6}},
+        gpio::{
+            gpioc::{PC10, PC11, PC6},
+            Alternate,
+        },
         prelude::*,
         pwm_input::PwmInput,
         serial,
@@ -59,18 +62,13 @@ mod app {
 
     #[init]
     fn init(ctx: init::Context) -> (Shared, Local, init::Monotonics) {
-
         /*
-    This patch enables the debugger to behave correctly during a WFI
-    See Errata: https://www.st.com/content/ccc/resource/technical/document/errata_sheet/c3/6b/f8/32/fc/01/48/6e/DM00155929.pdf/files/DM00155929.pdf/jcr:content/translations/en.DM00155929.pdf#%5B%7B%22num%22%3A37%2C%22gen%22%3A0%7D%2C%7B%22name%22%3A%22XYZ%22%7D%2C67%2C724%2Cnull%5D
-    See Also Github: https://github.com/probe-rs/probe-rs/issues/350#issuecomment-740550519
-*/
+            This patch enables the debugger to behave correctly during a WFI
+            See Errata: https://www.st.com/content/ccc/resource/technical/document/errata_sheet/c3/6b/f8/32/fc/01/48/6e/DM00155929.pdf/files/DM00155929.pdf/jcr:content/translations/en.DM00155929.pdf#%5B%7B%22num%22%3A37%2C%22gen%22%3A0%7D%2C%7B%22name%22%3A%22XYZ%22%7D%2C67%2C724%2Cnull%5D
+            See Also Github: https://github.com/probe-rs/probe-rs/issues/350#issuecomment-740550519
+        */
         // enable the dma1 master
-        ctx
-            .device
-            .RCC
-            .ahb1enr
-            .modify(|_, w| w.dma1en().enabled());
+        ctx.device.RCC.ahb1enr.modify(|_, w| w.dma1en().enabled());
         // enable the debugger.
         ctx.device.DBGMCU.cr.modify(|_, w| {
             w.dbg_sleep().set_bit();
@@ -93,9 +91,8 @@ mod app {
         let mut dcb = ctx.core.DCB;
         let dwt = ctx.core.DWT;
         let systick = ctx.core.SYST;
-        /* end RTIC monotonics */
-
         let mono = DwtSystick::new(&mut dcb, dwt, systick, MONONTONIC_FREQ);
+        /* end RTIC monotonics */
 
         // obtain a reference to the GPIOC register block, so we can configure pins on the PC bus.
         let gpioc = ctx.device.GPIOC.split();
@@ -114,34 +111,42 @@ mod app {
         // This is the primary interface to this driver.
         let uart4_tx = gpioc.pc10.into_alternate();
         let uart4_rx = gpioc.pc11.into_alternate();
-        let uart4_config = serial::config::Config{
+        let uart4_config = serial::config::Config {
             baudrate: 9600.bps(),
             wordlength: serial::config::WordLength::DataBits8,
             parity: serial::config::Parity::ParityNone,
             stopbits: serial::config::StopBits::STOP1,
-            dma: serial::config::DmaConfig::None
+            dma: serial::config::DmaConfig::None,
         };
-        let uart4_result = serial::Serial::new(ctx.device.UART4, (uart4_tx, uart4_rx), uart4_config, clocks);
+        let uart4_result =
+            serial::Serial::new(ctx.device.UART4, (uart4_tx, uart4_rx), uart4_config, clocks);
         if uart4_result.is_err() {
-            rprintln!("Failed to construct UART4 device. err := {:?}", uart4_result.err().unwrap());
+            rprintln!(
+                "Failed to construct UART4 device. err := {:?}",
+                uart4_result.err().unwrap()
+            );
             panic!("failed to construct UART4.")
         }
         let uart4 = uart4_result.unwrap();
 
         // kick off the periodic task.
-        periodic_emit_status::spawn_after(Seconds(1u32)).expect("failed to kick off periodic task.");
+        periodic_emit_status::spawn_after(Seconds(1u32))
+            .expect("failed to kick off periodic task.");
         // lastly return the shared and local resources, as per RTIC's spec.
         (
             Shared {
                 last_observed_turret_position: 0.0,
             },
-            Local { monitor, serial: uart4 },
+            Local {
+                monitor,
+                serial: uart4,
+            },
             init::Monotonics(mono),
         )
     }
 
     /* bring externed tasks into scope */
-    use crate::tasks::{tim8::tim8_cc, periodic_update::periodic_emit_status};
+    use crate::tasks::{periodic_update::periodic_emit_status, tim8::tim8_cc};
 
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
     // This allows us to specify the tasks in other modules and still work within
