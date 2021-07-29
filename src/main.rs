@@ -150,7 +150,7 @@ mod app {
         fn tim8_cc(context: tim8_cc::Context);
 
         // periodic UART telemetry output task
-        #[task(shared=[last_observed_turret_position])]
+        #[task(shared=[last_observed_turret_position], local=[serial])]
         fn periodic_emit_status(context: periodic_emit_status::Context);
     }
 }
