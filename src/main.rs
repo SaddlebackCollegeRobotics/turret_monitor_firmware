@@ -15,14 +15,16 @@ mod app {
     /* bring dependencies into scope */
     use rtt_target::{rprintln, rtt_init_print};
     use stm32f4xx_hal::{
-        gpio::{gpioc::PC6, Alternate},
+        gpio::{gpioc::{PC6, PC10, PC11}, Alternate},
         prelude::*,
         pwm_input::PwmInput,
-        stm32::TIM8,
+        stm32::{TIM8, UART4},
         timer::Timer,
+        serial
     };
     /// PWM input monitor type
     pub(crate) type PwmMonitor = PwmInput<TIM8, PC6<Alternate<3>>>;
+    pub(crate) type Uart4 = serial::Serial<UART4, (PC10<Alternate<8>>, PC11<Alternate<8>>)>;
 
     /* resources shared across RTIC tasks */
     #[shared]
@@ -35,6 +37,7 @@ mod app {
     #[local]
     struct Local {
         monitor: PwmMonitor,
+        serial: Uart4,
     }
 
     #[init]
@@ -60,12 +63,30 @@ mod app {
         //      cycle is complete. See the reference manual's paragraphs on PWM Input.
         let monitor = Timer::new(ctx.device.TIM8, &clocks).pwm_input(240.hz(), tim8_cc1);
 
+        // configure UART4.
+        // This is the primary interface to this driver.
+        let uart4_tx = gpioc.pc10.into_alternate();
+        let uart4_rx = gpioc.pc11.into_alternate();
+        let uart4_config = serial::config::Config{
+            baudrate: 9600.bps(),
+            wordlength: serial::config::WordLength::DataBits8,
+            parity: serial::config::Parity::ParityNone,
+            stopbits: serial::config::StopBits::STOP1,
+            dma: serial::config::DmaConfig::None
+        };
+        let uart4_result = serial::Serial::new(ctx.device.UART4, (uart4_tx, uart4_rx), uart4_config, clocks);
+        if uart4_result.is_err() {
+            rprintln!("Failed to construct UART4 device. err := {:?}", uart4_result.err().unwrap());
+            panic!("failed to construct UART4.")
+        }
+        let uart4 = uart4_result.unwrap();
+
         // lastly return the shared and local resources, as per RTIC's spec.
         (
             Shared {
                 last_observed_turret_position: 0.0,
             },
-            Local { monitor },
+            Local { monitor, serial: uart4 },
             init::Monotonics(),
         )
     }
