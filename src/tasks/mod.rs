@@ -3,8 +3,8 @@
 //!
 
 /*
-    private interface
- */
+   private interface
+*/
 
 /// Task handling periodicly emitting current telemetry observations to the UART.
 /// Note: this task requires a monotonic clock with at least 1s resolution.
