@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 cortex-m-rtic = "0.6.0-alpha.5"
 dwt-systick-monotonic = "0.1.0-alpha.3"
+cortex-m = "0.7.3"
 
 [dependencies.rtt-target]
 version = "0.3.1"

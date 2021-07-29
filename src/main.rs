@@ -34,8 +34,9 @@ mod app {
         stm32::{TIM8, UART4},
         timer::Timer,
     };
-    #[monotonic(binds = SysTick, default = true)]
     const MONONTONIC_FREQ: u32 = 8_000_000;
+
+    #[monotonic(binds = SysTick, default = true)]
     type SysMono = DwtSystick<MONONTONIC_FREQ>;
     /* bring dependencies into scope */
     /// PWM input monitor type
@@ -58,6 +59,25 @@ mod app {
 
     #[init]
     fn init(ctx: init::Context) -> (Shared, Local, init::Monotonics) {
+
+        /*
+    This patch enables the debugger to behave correctly during a WFI
+    See Errata: https://www.st.com/content/ccc/resource/technical/document/errata_sheet/c3/6b/f8/32/fc/01/48/6e/DM00155929.pdf/files/DM00155929.pdf/jcr:content/translations/en.DM00155929.pdf#%5B%7B%22num%22%3A37%2C%22gen%22%3A0%7D%2C%7B%22name%22%3A%22XYZ%22%7D%2C67%2C724%2Cnull%5D
+    See Also Github: https://github.com/probe-rs/probe-rs/issues/350#issuecomment-740550519
+*/
+        // enable the dma1 master
+        ctx
+            .device
+            .RCC
+            .ahb1enr
+            .modify(|_, w| w.dma1en().enabled());
+        // enable the debugger.
+        ctx.device.DBGMCU.cr.modify(|_, w| {
+            w.dbg_sleep().set_bit();
+            w.dbg_standby().set_bit();
+            w.dbg_stop().set_bit()
+        });
+
         // Enable RTT logging
         rtt_init_print!();
         rprintln!("hello, world!");
@@ -108,6 +128,8 @@ mod app {
         }
         let uart4 = uart4_result.unwrap();
 
+        // kick off the periodic task.
+        periodic_emit_status::spawn_after(Seconds(1u32)).expect("failed to kick off periodic task.");
         // lastly return the shared and local resources, as per RTIC's spec.
         (
             Shared {
