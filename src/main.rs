@@ -7,9 +7,18 @@ use panic_rtt_target as _panic_handler;
 
 /* declare a submodule for handling tim8 interrupts */
 mod tim8;
-
-/* declare the RTIC application itself */
-#[rtic::app(device = stm32f4xx_hal::stm32, peripherals = true)]
+/* declare periodic task submodule */
+mod periodic_update;
+/*
+  Declare the RTIC application itself.
+  Firstly, we must provide it with the path to the device's PAC.
+    - most HALs provide this as their `{hal}::stm32` module.
+  We also want the device's peripherals, so we request those.
+    - RTIC will provde these on the Context object of init.
+  Lastly, we want to use some "software tasks", so we need to donate some unused interrupts to RTIC.
+   - this is done via the `dispatchers` argument
+ */
+#[rtic::app(device = stm32f4xx_hal::stm32, peripherals = true, dispatchers=[SPI2, SPI3])]
 mod app {
 
     /* bring dependencies into scope */
@@ -20,7 +29,7 @@ mod app {
         pwm_input::PwmInput,
         stm32::{TIM8, UART4},
         timer::Timer,
-        serial
+        serial,
     };
     /// PWM input monitor type
     pub(crate) type PwmMonitor = PwmInput<TIM8, PC6<Alternate<3>>>;
@@ -93,6 +102,7 @@ mod app {
 
     /* bring tim8's interrupt handler into scope */
     use crate::tim8::tim8_cc;
+    use crate::periodic_update::periodic_emit_status;
 
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
     // This allows us to specify the tasks in other modules and still work within
@@ -100,5 +110,8 @@ mod app {
     extern "Rust" {
         #[task(binds=TIM8_CC, local=[monitor], shared=[last_observed_turret_position])]
         fn tim8_cc(context: tim8_cc::Context);
+
+        #[task(shared=[last_observed_turret_position])]
+        fn periodic_emit_status(context: periodic_emit_status::Context);
     }
 }
