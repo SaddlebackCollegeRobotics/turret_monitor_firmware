@@ -118,16 +118,9 @@ mod app {
             stopbits: serial::config::StopBits::STOP1,
             dma: serial::config::DmaConfig::None,
         };
-        let uart4_result =
-            serial::Serial::new(ctx.device.UART4, (uart4_tx, uart4_rx), uart4_config, clocks);
-        if uart4_result.is_err() {
-            rprintln!(
-                "Failed to construct UART4 device. err := {:?}",
-                uart4_result.err().unwrap()
-            );
-            panic!("failed to construct UART4.")
-        }
-        let uart4 = uart4_result.unwrap();
+        let uart4 =
+            serial::Serial::new(ctx.device.UART4, (uart4_tx, uart4_rx), uart4_config, clocks)
+                .expect("failed to configure UART4.");
 
         // kick off the periodic task.
         periodic_emit_status::spawn_after(Seconds(1u32))
@@ -146,7 +139,7 @@ mod app {
     }
 
     /* bring externed tasks into scope */
-    use crate::tasks::{periodic_update::periodic_emit_status, tim8::tim8_cc};
+    use crate::tasks::{periodic_emit_status, tim8_cc};
 
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
     // This allows us to specify the tasks in other modules and still work within
