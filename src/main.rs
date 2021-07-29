@@ -5,10 +5,9 @@
 
 use panic_rtt_target as _panic_handler;
 
-/* declare a submodule for handling tim8 interrupts */
-mod tim8;
-/* declare periodic task submodule */
-mod periodic_update;
+/// submodule holding task handlers
+mod tasks;
+
 /*
   Declare the RTIC application itself.
   Firstly, we must provide it with the path to the device's PAC.
@@ -18,19 +17,27 @@ mod periodic_update;
   Lastly, we want to use some "software tasks", so we need to donate some unused interrupts to RTIC.
    - this is done via the `dispatchers` argument
  */
-#[rtic::app(device = stm32f4xx_hal::stm32, peripherals = true, dispatchers=[SPI2, SPI3])]
+#[rtic::app(
+    device = stm32f4xx_hal::stm32,
+    peripherals = true,
+    dispatchers=[SPI2, SPI3],
+)]
 mod app {
-
-    /* bring dependencies into scope */
+    use dwt_systick_monotonic::DwtSystick;
+    use rtic::time::duration::Seconds;
     use rtt_target::{rprintln, rtt_init_print};
     use stm32f4xx_hal::{
-        gpio::{gpioc::{PC6, PC10, PC11}, Alternate},
+        gpio::{Alternate, gpioc::{PC10, PC11, PC6}},
         prelude::*,
         pwm_input::PwmInput,
+        serial,
         stm32::{TIM8, UART4},
         timer::Timer,
-        serial,
     };
+    #[monotonic(binds = SysTick, default = true)]
+    const MONONTONIC_FREQ: u32 = 8_000_000;
+    type SysMono = DwtSystick<MONONTONIC_FREQ>;
+    /* bring dependencies into scope */
     /// PWM input monitor type
     pub(crate) type PwmMonitor = PwmInput<TIM8, PC6<Alternate<3>>>;
     pub(crate) type Uart4 = serial::Serial<UART4, (PC10<Alternate<8>>, PC11<Alternate<8>>)>;
@@ -58,6 +65,17 @@ mod app {
         let rcc = ctx.device.RCC.constrain();
         // then retreive the clocks, so we can configure timers later on
         let clocks = rcc.cfgr.freeze();
+
+        /* start RTIC monotonics */
+        // configure RTIC's monotonic using the system tick.
+        // Note: this has a maximum duration of ~20 seconds, so it can't be used for super long
+        // delays.
+        let mut dcb = ctx.core.DCB;
+        let dwt = ctx.core.DWT;
+        let systick = ctx.core.SYST;
+        /* end RTIC monotonics */
+
+        let mono = DwtSystick::new(&mut dcb, dwt, systick, MONONTONIC_FREQ);
 
         // obtain a reference to the GPIOC register block, so we can configure pins on the PC bus.
         let gpioc = ctx.device.GPIOC.split();
@@ -96,21 +114,22 @@ mod app {
                 last_observed_turret_position: 0.0,
             },
             Local { monitor, serial: uart4 },
-            init::Monotonics(),
+            init::Monotonics(mono),
         )
     }
 
-    /* bring tim8's interrupt handler into scope */
-    use crate::tim8::tim8_cc;
-    use crate::periodic_update::periodic_emit_status;
+    /* bring externed tasks into scope */
+    use crate::tasks::{tim8::tim8_cc, periodic_update::periodic_emit_status};
 
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
     // This allows us to specify the tasks in other modules and still work within
     // RTIC's infrastructure.
     extern "Rust" {
+        // PWM Monitor interrupt handler
         #[task(binds=TIM8_CC, local=[monitor], shared=[last_observed_turret_position])]
         fn tim8_cc(context: tim8_cc::Context);
 
+        // periodic UART telemetry output task
         #[task(shared=[last_observed_turret_position])]
         fn periodic_emit_status(context: periodic_emit_status::Context);
     }
