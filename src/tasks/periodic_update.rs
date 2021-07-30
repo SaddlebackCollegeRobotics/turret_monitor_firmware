@@ -40,9 +40,11 @@ pub(crate) fn periodic_emit_status(
             tx.next_transfer_with(|buf, _| {
                 // buf[0..4].clone_from_slice(&turret_position.to_be_bytes());
                 // buf[5] = ',' as u8;
-                buf.fill(0xAF);
+                buf.fill(0x00);
+                buf[0..4].copy_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+                rprintln!("buf :: {:?}", buf);
                 let buf_len= buf.len();
-                    (buf, buf_len)
+                    (buf, 4)
             }) .expect("Something went horribly wrong setting up the transfer.");
         }
         *context.shared.send = Some(TxBufferState::Running(tx));
