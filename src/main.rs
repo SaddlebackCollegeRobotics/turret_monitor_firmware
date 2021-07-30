@@ -1,4 +1,3 @@
-#![deny(unsafe_code)]
 #![no_main]
 #![no_std]
 #![allow(unused_imports)]
@@ -48,28 +47,30 @@ mod app {
     pub(crate) type PwmMonitor = PwmInput<TIM8, PC6<Alternate<3>>>;
     /// Serial connection type
     pub(crate) type Usart1 = serial::Tx<USART1>;
-    pub(crate) type Usart1Buf = &'static mut [u8;32];
+    pub(crate) const BUF_SIZE: usize = 32;
+    pub(crate) type Usart1Buf = &'static mut [u8;BUF_SIZE];
     /// Serial TX DMA type
     pub(crate) type Usart1DMATransferTx =
         Transfer<Stream7<DMA2>, Usart1, MemoryToPeripheral, Usart1Buf, 4>;
-
+    use crate::tasks::TxBufferState;
     /* resources shared across RTIC tasks */
     #[shared]
     struct Shared {
         /// the last observed position of the turret
         last_observed_turret_position: f32,
+        #[lock_free]
+        send: Option<TxBufferState>,
+
     }
 
     /* resources local to specific RTIC tasks */
     #[local]
     struct Local {
         monitor: PwmMonitor,
-        serial_tx_transfer: Usart1DMATransferTx,
-        serial_tx_buf1: Usart1Buf,
-        serial_tx_buf2: Usart1Buf,
-        serial_tx_next_buf: crate::tasks::NextSerialBuffer,
     }
-    #[init]
+    #[init(
+        local = [tx_buf: [u8;BUF_SIZE] = [0; BUF_SIZE]]
+    )]
     fn init(ctx: init::Context) -> (Shared, Local, init::Monotonics) {
         /*
             This patch enables the debugger to behave correctly during a WFI
@@ -106,7 +107,7 @@ mod app {
         // obtain a reference to the GPIO* register blocks, so we can configure pins on the P* buses.
         let gpioc = ctx.device.GPIOC.split();
         let gpioa = ctx.device.GPIOA.split();
-        let gpiob = ctx.device.GPIOB.split();
+        // let gpiob = ctx.device.GPIOB.split();
         // obtain
 
         // Configure one of TIM8's CH1 pins, so that its attached to the peripheral.
@@ -136,15 +137,12 @@ mod app {
         // set up the DMA transfer.
         let dma2_streams: StreamsTuple<DMA2> = StreamsTuple::new(ctx.device.DMA2);
         let dma1_stream4_config = DmaConfig::default()
-            .transfer_error_interrupt(true)
-            .double_buffer(true);
-        let usart1_tx_buf1: Usart1Buf = singleton!(: [u8; 32] = [0; 32]).unwrap();
-        let usart1_tx_buf2: Usart1Buf = singleton!(: [u8; 32] = [0; 32]).unwrap();
+            .transfer_complete_interrupt(true);
         let usart1_dma_transfer_tx = Transfer::init_memory_to_peripheral(
             dma2_streams.7,
             usart1,
-            usart1_tx_buf1,
-            Some(usart1_tx_buf2),
+            ctx.local.tx_buf,
+            None,
             dma1_stream4_config,
         );
 
@@ -155,21 +153,17 @@ mod app {
         (
             Shared {
                 last_observed_turret_position: 0.0,
+                send: Some(TxBufferState::Idle(usart1_dma_transfer_tx ))
             },
             Local {
                 monitor,
-                serial_tx_transfer: usart1_dma_transfer_tx,
-
-                serial_tx_buf1: usart1_tx_buf1,
-                serial_tx_buf2: usart1_tx_buf2,
-                serial_tx_next_buf: crate::tasks::NextSerialBuffer::First
             },
             init::Monotonics(mono),
         )
     }
 
     /* bring externed tasks into scope */
-    use crate::tasks::{periodic_emit_status, tim8_cc};
+    use crate::tasks::{periodic_emit_status, tim8_cc, on_dma2_stream7};
 
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
     // This allows us to specify the tasks in other modules and still work within
@@ -181,13 +175,15 @@ mod app {
 
         // periodic UART telemetry output task
         #[task(
-            shared=[last_observed_turret_position],
-            local=[
-                serial_tx_transfer,
-                serial_tx_next_buf,
-                serial_tx_buf1,
-                serial_tx_buf2,
-            ])]
+            shared=[last_observed_turret_position, send]
+            )]
         fn periodic_emit_status(context: periodic_emit_status::Context);
+
+        // when USART1 is done sending data
+        #[task(
+        binds=DMA2_STREAM7,
+        shared = [send]
+        )]
+        fn on_dma2_stream7(context: on_dma2_stream7::Context);
     }
 }

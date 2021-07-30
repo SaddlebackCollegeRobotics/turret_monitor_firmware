@@ -1,14 +1,16 @@
 use rtic::time::duration::Seconds;
 use rtt_target::rprintln;
 
-use crate::app::{Usart1DMATransferTx, Usart1Buf};
+use crate::app::{Usart1DMATransferTx, Usart1Buf, Usart1, BUF_SIZE};
 use rtic::mutex_prelude::*;
 use stm32f4xx_hal::prelude::*;
-use stm32f4xx_hal::pac::i2c1::cr1::POS_A::NEXT;
+use embedded_dma::WriteTarget;
 
-pub(crate) enum NextSerialBuffer {
-    First,
-    Second,
+pub enum TxBufferState {
+    // Ready, use the contained buffer for next transfer
+    Running(Usart1DMATransferTx),
+    // In flight, but here is the next buffer to use.
+    Idle(Usart1DMATransferTx),
 }
 
 pub(crate) fn periodic_emit_status(
@@ -30,25 +32,22 @@ pub(crate) fn periodic_emit_status(
         leaving critical section
     */
 
-    let tx: &mut Usart1DMATransferTx = context.local.serial_tx_transfer;
-    // figure out which buffer to use for this DMA transfer
-    // (we have two, which must be alternated between transfers)
-    let mut next_buffer: Usart1Buf = match context.local.serial_tx_next_buf {
-        NextSerialBuffer::First => {
-            context.local.serial_tx_next_buf = &mut NextSerialBuffer::Second;
-            context.local.serial_tx_buf1
+    let dma_state: TxBufferState = context.shared.send.take().expect("failed to aquire buffer state");
+    if let TxBufferState::Idle(mut tx) = dma_state {
+        rprintln!("DMA was idle, setting up next transfer...");
+
+        unsafe {
+            tx.next_transfer_with(|buf, _| {
+                // buf[0..4].clone_from_slice(&turret_position.to_be_bytes());
+                // buf[5] = ',' as u8;
+                buf.fill(0xAF);
+                let buf_len= buf.len();
+                    (buf, buf_len)
+            }) .expect("Something went horribly wrong setting up the transfer.");
         }
-        NextSerialBuffer::Second => {
-            context.local.serial_tx_next_buf = &mut NextSerialBuffer::First;
-            context.local.serial_tx_buf2
-        }
+        *context.shared.send = Some(TxBufferState::Running(tx));
     };
-    // ensure the buffer is nulled out.
-    next_buffer.fill(0x00);
-    next_buffer[0..3].clone_from_slice(&turret_position.to_be_bytes());
 
-
-    tx.next_transfer(next_buffer);
     // serial.write_fmt(format_args!("{}", turret_position)).expect("failed to write to UARt");
 
     reschedule_periodic();
