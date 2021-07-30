@@ -1,10 +1,10 @@
 use rtic::time::duration::Seconds;
 use rtt_target::rprintln;
 
-use crate::app::{Usart1DMATransferTx, Usart1Buf, Usart1, BUF_SIZE};
+use crate::app::{Usart1, Usart1Buf, Usart1DMATransferTx, BUF_SIZE};
+use embedded_dma::WriteTarget;
 use rtic::mutex_prelude::*;
 use stm32f4xx_hal::prelude::*;
-use embedded_dma::WriteTarget;
 const PERODIC_DELAY: Seconds = Seconds(1u32);
 pub enum TxBufferState {
     // Ready, use the contained buffer for next transfer
@@ -24,16 +24,23 @@ pub(crate) fn periodic_emit_status(
     /*
         entering critical section
     */
-    let turret_position:f32 = context.shared.last_observed_turret_position.lock(|guard| {*guard });
+    let turret_position: f32 = context
+        .shared
+        .last_observed_turret_position
+        .lock(|guard| *guard);
     /*
         leaving critical section
     */
     // retrieve the DMA state
-    let dma_state: TxBufferState = context.shared.send.take().expect("failed to aquire buffer state");
+    let dma_state: TxBufferState = context
+        .shared
+        .send
+        .take()
+        .expect("failed to aquire buffer state");
 
-    let mut payload: [u8; BUF_SIZE] = [0x00;BUF_SIZE];
+    let mut payload: [u8; BUF_SIZE] = [0x00; BUF_SIZE];
     payload[0..4].copy_from_slice(&turret_position.to_be_bytes());
-    payload[5] = ',' as u8;
+    payload[5] = b',';
 
     // if the DMA is idle, start a new transfer.
     if let TxBufferState::Idle(mut tx) = dma_state {
@@ -49,9 +56,10 @@ pub(crate) fn periodic_emit_status(
                 // log the TX buffer
                 rprintln!("buf :: {:?}", buf);
                 // calculate the buffer's length, if only to satisfy the closure's contract.
-                let buf_len= buf.len();
-                    (buf, buf_len) // Don't know what the second argument is, but it seems to be ignored.
-            }) .expect("Something went horribly wrong setting up the transfer.");
+                let buf_len = buf.len();
+                (buf, buf_len) // Don't know what the second argument is, but it seems to be ignored.
+            })
+            .expect("Something went horribly wrong setting up the transfer.");
         }
         // update the DMA state into the running phase
         *context.shared.send = Some(TxBufferState::Running(tx));

@@ -22,6 +22,9 @@ mod tasks;
     dispatchers=[SPI2, SPI3],
 )]
 mod app {
+    /* bring dependencies into scope */
+
+    use crate::tasks::TxBufferState;
     use cortex_m::singleton;
     use dwt_systick_monotonic::DwtSystick;
     use rtic::time::duration::Seconds;
@@ -39,28 +42,41 @@ mod app {
         timer::Timer,
     };
 
+    /*
+    Monotonic config
+     */
     const MONONTONIC_FREQ: u32 = 8_000_000;
     #[monotonic(binds = SysTick, default = true)]
     type SysMono = DwtSystick<MONONTONIC_FREQ>;
-    /* bring dependencies into scope */
+
+    /*
+    Peripheral type definitions
+     */
     /// PWM input monitor type
     pub(crate) type PwmMonitor = PwmInput<TIM8, PC6<Alternate<3>>>;
     /// Serial connection type
     pub(crate) type Usart1 = serial::Tx<USART1>;
+    /*
+    USART DMA definitions
+     */
+    /// Size of USART1's DMA buffer
     pub(crate) const BUF_SIZE: usize = 32;
-    pub(crate) type Usart1Buf = &'static mut [u8;BUF_SIZE];
+
+    /// USART1's DMA buffer type
+    pub(crate) type Usart1Buf = &'static mut [u8; BUF_SIZE];
+
     /// Serial TX DMA type
     pub(crate) type Usart1DMATransferTx =
         Transfer<Stream7<DMA2>, Usart1, MemoryToPeripheral, Usart1Buf, 4>;
-    use crate::tasks::TxBufferState;
+
     /* resources shared across RTIC tasks */
     #[shared]
     struct Shared {
         /// the last observed position of the turret
         last_observed_turret_position: f32,
+
         #[lock_free]
         send: Option<TxBufferState>,
-
     }
 
     /* resources local to specific RTIC tasks */
@@ -137,7 +153,9 @@ mod app {
         // set up the DMA transfer.
         let dma2_streams: StreamsTuple<DMA2> = StreamsTuple::new(ctx.device.DMA2);
         let dma1_stream4_config = DmaConfig::default()
-            .transfer_complete_interrupt(true).memory_increment(true).inter;
+            .transfer_complete_interrupt(true)
+            .memory_increment(true);
+
         let usart1_dma_transfer_tx = Transfer::init_memory_to_peripheral(
             dma2_streams.7,
             usart1,
@@ -153,17 +171,15 @@ mod app {
         (
             Shared {
                 last_observed_turret_position: 0.0,
-                send: Some(TxBufferState::Idle(usart1_dma_transfer_tx ))
+                send: Some(TxBufferState::Idle(usart1_dma_transfer_tx)),
             },
-            Local {
-                monitor,
-            },
+            Local { monitor },
             init::Monotonics(mono),
         )
     }
 
     /* bring externed tasks into scope */
-    use crate::tasks::{periodic_emit_status, tim8_cc, on_dma2_stream7};
+    use crate::tasks::{on_dma2_stream7, periodic_emit_status, tim8_cc};
 
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
     // This allows us to specify the tasks in other modules and still work within
