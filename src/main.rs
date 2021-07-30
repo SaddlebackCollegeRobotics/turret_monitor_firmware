@@ -23,10 +23,12 @@ mod tasks;
     dispatchers=[SPI2, SPI3],
 )]
 mod app {
+    use cortex_m::singleton;
     use dwt_systick_monotonic::DwtSystick;
     use rtic::time::duration::Seconds;
     use rtt_target::{rprintln, rtt_init_print};
     use stm32f4xx_hal::{
+        dma::{config::DmaConfig, Channel7, MemoryToPeripheral, Stream7, StreamsTuple, Transfer},
         gpio::{
             gpioc::{PC10, PC11, PC6},
             Alternate,
@@ -34,17 +36,22 @@ mod app {
         prelude::*,
         pwm_input::PwmInput,
         serial,
-        stm32::{TIM8, UART4},
+        stm32::{DMA2, TIM8, USART1},
         timer::Timer,
     };
-    const MONONTONIC_FREQ: u32 = 8_000_000;
 
+    const MONONTONIC_FREQ: u32 = 8_000_000;
     #[monotonic(binds = SysTick, default = true)]
     type SysMono = DwtSystick<MONONTONIC_FREQ>;
     /* bring dependencies into scope */
     /// PWM input monitor type
     pub(crate) type PwmMonitor = PwmInput<TIM8, PC6<Alternate<3>>>;
-    pub(crate) type Uart4 = serial::Serial<UART4, (PC10<Alternate<8>>, PC11<Alternate<8>>)>;
+    /// Serial connection type
+    pub(crate) type Usart1 = serial::Tx<USART1>;
+    pub(crate) type Usart1Buf = &'static mut [u8;32];
+    /// Serial TX DMA type
+    pub(crate) type Usart1DMATransferTx =
+        Transfer<Stream7<DMA2>, Usart1, MemoryToPeripheral, Usart1Buf, 4>;
 
     /* resources shared across RTIC tasks */
     #[shared]
@@ -57,9 +64,11 @@ mod app {
     #[local]
     struct Local {
         monitor: PwmMonitor,
-        serial: Uart4,
+        serial_tx_transfer: Usart1DMATransferTx,
+        serial_tx_buf1: Usart1Buf,
+        serial_tx_buf2: Usart1Buf,
+        serial_tx_next_buf: crate::tasks::NextSerialBuffer,
     }
-
     #[init]
     fn init(ctx: init::Context) -> (Shared, Local, init::Monotonics) {
         /*
@@ -94,8 +103,11 @@ mod app {
         let mono = DwtSystick::new(&mut dcb, dwt, systick, MONONTONIC_FREQ);
         /* end RTIC monotonics */
 
-        // obtain a reference to the GPIOC register block, so we can configure pins on the PC bus.
+        // obtain a reference to the GPIO* register blocks, so we can configure pins on the P* buses.
         let gpioc = ctx.device.GPIOC.split();
+        let gpioa = ctx.device.GPIOA.split();
+        let gpiob = ctx.device.GPIOB.split();
+        // obtain
 
         // Configure one of TIM8's CH1 pins, so that its attached to the peripheral.
         // We need to do this since the pins are multiplexed across multiple peripherals
@@ -109,18 +121,32 @@ mod app {
 
         // configure UART4.
         // This is the primary interface to this driver.
-        let uart4_tx = gpioc.pc10.into_alternate();
-        let uart4_rx = gpioc.pc11.into_alternate();
-        let uart4_config = serial::config::Config {
+        let usart1_tx = gpioa.pa9.into_alternate();
+        let usart1_config = serial::config::Config {
             baudrate: 9600.bps(),
             wordlength: serial::config::WordLength::DataBits8,
             parity: serial::config::Parity::ParityNone,
             stopbits: serial::config::StopBits::STOP1,
-            dma: serial::config::DmaConfig::None,
+            dma: serial::config::DmaConfig::Tx,
         };
-        let uart4 =
-            serial::Serial::new(ctx.device.UART4, (uart4_tx, uart4_rx), uart4_config, clocks)
+        let usart1: Usart1 =
+            serial::Serial::tx(ctx.device.USART1, usart1_tx, usart1_config, clocks)
                 .expect("failed to configure UART4.");
+
+        // set up the DMA transfer.
+        let dma2_streams: StreamsTuple<DMA2> = StreamsTuple::new(ctx.device.DMA2);
+        let dma1_stream4_config = DmaConfig::default()
+            .transfer_error_interrupt(true)
+            .double_buffer(true);
+        let usart1_tx_buf1: Usart1Buf = singleton!(: [u8; 32] = [0; 32]).unwrap();
+        let usart1_tx_buf2: Usart1Buf = singleton!(: [u8; 32] = [0; 32]).unwrap();
+        let usart1_dma_transfer_tx = Transfer::init_memory_to_peripheral(
+            dma2_streams.7,
+            usart1,
+            usart1_tx_buf1,
+            Some(usart1_tx_buf2),
+            dma1_stream4_config,
+        );
 
         // kick off the periodic task.
         periodic_emit_status::spawn_after(Seconds(1u32))
@@ -132,7 +158,11 @@ mod app {
             },
             Local {
                 monitor,
-                serial: uart4,
+                serial_tx_transfer: usart1_dma_transfer_tx,
+
+                serial_tx_buf1: usart1_tx_buf1,
+                serial_tx_buf2: usart1_tx_buf2,
+                serial_tx_next_buf: crate::tasks::NextSerialBuffer::First
             },
             init::Monotonics(mono),
         )
@@ -150,7 +180,14 @@ mod app {
         fn tim8_cc(context: tim8_cc::Context);
 
         // periodic UART telemetry output task
-        #[task(shared=[last_observed_turret_position], local=[serial])]
+        #[task(
+            shared=[last_observed_turret_position],
+            local=[
+                serial_tx_transfer,
+                serial_tx_next_buf,
+                serial_tx_buf1,
+                serial_tx_buf2,
+            ])]
         fn periodic_emit_status(context: periodic_emit_status::Context);
     }
 }

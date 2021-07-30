@@ -17,4 +17,5 @@ mod tim8;
     public(crate) interface
 */
 pub(crate) use periodic_update::periodic_emit_status;
+pub(crate) use periodic_update::NextSerialBuffer;
 pub(crate) use tim8::tim8_cc;
