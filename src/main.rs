@@ -137,7 +137,7 @@ mod app {
         // set up the DMA transfer.
         let dma2_streams: StreamsTuple<DMA2> = StreamsTuple::new(ctx.device.DMA2);
         let dma1_stream4_config = DmaConfig::default()
-            .transfer_complete_interrupt(true).memory_increment(true);
+            .transfer_complete_interrupt(true).memory_increment(true).inter;
         let usart1_dma_transfer_tx = Transfer::init_memory_to_peripheral(
             dma2_streams.7,
             usart1,
