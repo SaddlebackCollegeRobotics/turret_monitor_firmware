@@ -247,7 +247,8 @@ mod app {
         fn on_usart1_txe(context: on_usart1_txe::Context);
 
         #[task(
-        binds = DMA2_STREAM2
+        binds = DMA2_STREAM2,
+        shared = [crc]
         )]
         // when USART1 is done receiving data
         fn on_usart1_rxne(context: on_usart1_rxne::Context);

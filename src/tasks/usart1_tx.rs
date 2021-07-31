@@ -18,7 +18,7 @@ pub(crate) fn on_usart1_txe(ctx: on_usart1_txe::Context) {
         }
         TxBufferState::Idle(mut tx) => {
             // this shouldn't happen.
-            rprintln!("DMA shouldn't be firing interrupts while we are idle.");
+            rprintln!("[ERROR] DMA shouldn't be firing interrupts while we are idle.");
             tx.pause(|_| {});
             *ctx.shared.send = Some(TxBufferState::Idle(tx))
         }
