@@ -42,16 +42,16 @@ In terms of abstraction, the core unit of DMA is the `Transaction`.
 A `transaction` represents a specific DMA request, such as `memory to memory` transfers.
 
 Every transaction requires a several components:
- - the kind of transaction
- - ownership to the source and destination buffers
-   - These buffers MUST outlive the DMA request itself, or UB occurs.
- - In the case of `Peripheral to memory` or `memory to peripheral` transactions, the peripheral has to be configured for DMA.
- - Any special modes or behaviors of the transaction (such as `burst` or `double-buffer` modes.)
+- the kind of transaction
+- ownership to the source and destination buffers
+    - These buffers MUST outlive the DMA request itself, or UB occurs.
+- In the case of `Peripheral to memory` or `memory to peripheral` transactions, the peripheral has to be configured for DMA.
+- Any special modes or behaviors of the transaction (such as `burst` or `double-buffer` modes.)
 
 ### DMA interrupts
 Since DMA acts asynchronously of the main CPU, a signalling mechanism is required to
 *notify* the CPU when DMA finishes servicing a request.
 Thankfully, the CPU already has such a mechanism: interrupts.
 
-DMA transactions can be configured to fire interrupts when certain events happen such as 
+DMA transactions can be configured to fire interrupts when certain events happen such as
 when the transfer completes, or an error occured during request servicing.

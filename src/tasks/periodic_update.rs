@@ -2,15 +2,22 @@ use rtic::time::duration::Seconds;
 use rtt_target::rprintln;
 
 use crate::app::{Usart1, Usart1Buf, Usart1DMATransferTx, BUF_SIZE};
-use embedded_dma::WriteTarget;
 use rtic::mutex_prelude::*;
+use serde::{Deserialize, Serialize};
 use stm32f4xx_hal::prelude::*;
+
 const PERODIC_DELAY: Seconds = Seconds(1u32);
+
 pub enum TxBufferState {
     // Ready, use the contained buffer for next transfer
     Running(Usart1DMATransferTx),
     // In flight, but here is the next buffer to use.
     Idle(Usart1DMATransferTx),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Payload {
+    turret_pos: f32,
 }
 
 pub(crate) fn periodic_emit_status(
@@ -28,6 +35,7 @@ pub(crate) fn periodic_emit_status(
         .shared
         .last_observed_turret_position
         .lock(|guard| *guard);
+
     /*
         leaving critical section
     */
@@ -38,9 +46,19 @@ pub(crate) fn periodic_emit_status(
         .take()
         .expect("failed to aquire buffer state");
 
-    let mut payload: [u8; BUF_SIZE] = [0x00; BUF_SIZE];
-    payload[0..4].copy_from_slice(&turret_position.to_be_bytes());
-    payload[5] = b',';
+    // declare a buffer to fit the response in
+    let mut payload_buffer: [u8; BUF_SIZE] = [0xFF; BUF_SIZE];
+    // define the response
+    let payload = Payload {
+        turret_pos: turret_position,
+    };
+    // attempt to serialize the response
+    if let Err(e) = serde_json_core::to_slice(&payload, &mut payload_buffer) {
+        rprintln!("Failed to encode, error {:?}", e);
+        // bail out without panicking.
+        return reschedule_periodic();
+    }
+    rprintln!("payload := {:?}", payload);
 
     // if the DMA is idle, start a new transfer.
     if let TxBufferState::Idle(mut tx) = dma_state {
@@ -52,7 +70,7 @@ pub(crate) fn periodic_emit_status(
             // in order to be safe. This was ensured during creation of the Transfer object.
             tx.next_transfer_with(|buf, _| {
                 // populate the DMA buffer with the new bufer's content
-                buf.copy_from_slice(&payload);
+                buf.copy_from_slice(&payload_buffer);
                 // log the TX buffer
                 rprintln!("buf :: {:?}", buf);
                 // calculate the buffer's length, if only to satisfy the closure's contract.
