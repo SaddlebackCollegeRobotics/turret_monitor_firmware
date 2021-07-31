@@ -1,8 +1,8 @@
-use crate::app::on_dma2_stream7;
+use crate::app::on_usart1_txe;
 use crate::tasks::TxBufferState;
 use rtt_target::rprintln;
 
-pub(crate) fn on_dma2_stream7(ctx: on_dma2_stream7::Context) {
+pub(crate) fn on_usart1_txe(ctx: on_usart1_txe::Context) {
     let dma_state: TxBufferState = ctx
         .shared
         .send

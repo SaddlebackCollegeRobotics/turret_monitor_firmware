@@ -98,10 +98,16 @@ mod app {
         monitor: PwmMonitor,
     }
 
-    /* the init task, called once at startup */
+    /*
+    The init task, called once at startup.
+     The locals have 'static storage, which make them suitable for usage with DMA.
+     */
 
     #[init(
-    local = [tx_buf: [u8; BUF_SIZE] = [0; BUF_SIZE]]
+    local = [
+        tx_buf: [u8; BUF_SIZE] = [0; BUF_SIZE],
+        rx_buf: [u8; BUF_SIZE] = [0; BUF_SIZE],
+    ]
     )]
     fn init(ctx: init::Context) -> (Shared, Local, init::Monotonics) {
         /*
@@ -176,9 +182,14 @@ mod app {
         .expect("failed to configure UART4.")
         .split();
 
-        // set up the DMA transfer.
+        // set up the DMA transfers.
         let dma2_streams: StreamsTuple<DMA2> = StreamsTuple::new(ctx.device.DMA2);
+
         let usart1_dma_tx_config = DmaConfig::default()
+            .transfer_complete_interrupt(true)
+            .memory_increment(true);
+
+        let usart1_dma_rx_config = DmaConfig::default()
             .transfer_complete_interrupt(true)
             .memory_increment(true);
 
@@ -212,7 +223,7 @@ mod app {
     }
 
     /* bring externed tasks into scope */
-    use crate::tasks::{on_dma2_stream7, periodic_emit_status, tim8_cc};
+    use crate::tasks::{on_usart1_txe, periodic_emit_status, tim8_cc, on_usart1_rxne};
 
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
     // This allows us to specify the tasks in other modules and still work within
@@ -224,7 +235,7 @@ mod app {
 
         // periodic UART telemetry output task
         #[task(
-        shared = [last_observed_turret_position, send]
+        shared = [last_observed_turret_position, send, crc]
         )]
         fn periodic_emit_status(context: periodic_emit_status::Context);
 
@@ -233,6 +244,12 @@ mod app {
         binds = DMA2_STREAM7,
         shared = [send]
         )]
-        fn on_dma2_stream7(context: on_dma2_stream7::Context);
+        fn on_usart1_txe(context: on_usart1_txe::Context);
+
+        #[task(
+        binds = DMA2_STREAM2
+        )]
+        // when USART1 is done receiving data
+        fn on_usart1_rxne(context: on_usart1_rxne::Context);
     }
 }

@@ -6,7 +6,9 @@
    private interface
 */
 
-mod dma2_stream7;
+mod usart1_tx;
+mod usart1_rx;
+
 /// Task handling periodicly emitting current telemetry observations to the UART.
 /// Note: this task requires a monotonic clock with at least 1s resolution.
 mod periodic_update;
@@ -17,7 +19,8 @@ mod tim8;
 /*
     public(crate) interface
 */
-pub(crate) use dma2_stream7::on_dma2_stream7;
+pub(crate) use usart1_tx::on_usart1_txe;
+pub(crate) use usart1_rx::on_usart1_rxne;
 pub(crate) use periodic_update::periodic_emit_status;
 pub use periodic_update::TxBufferState;
 pub(crate) use tim8::tim8_cc;
