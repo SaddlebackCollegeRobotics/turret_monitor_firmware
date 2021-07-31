@@ -17,9 +17,9 @@ mod tasks;
   - this is done via the `dispatchers` argument
 */
 #[rtic::app(
-    device = stm32f4xx_hal::stm32,
-    peripherals = true,
-    dispatchers=[SPI2, SPI3],
+device = stm32f4xx_hal::stm32,
+peripherals = true,
+dispatchers = [SPI2, SPI3],
 )]
 mod app {
     /* bring dependencies into scope */
@@ -30,13 +30,18 @@ mod app {
     use rtic::time::duration::Seconds;
     use rtt_target::{rprintln, rtt_init_print};
     use stm32f4xx_hal::{
-        dma::{config::DmaConfig, Channel7, MemoryToPeripheral, Stream7, StreamsTuple, Transfer},
+        crc32::Crc32,
+        dma::{
+            config::DmaConfig, Channel7, MemoryToPeripheral, PeripheralToMemory, Stream2, Stream7,
+            StreamsTuple, Transfer,
+        },
         gpio::{
             gpioc::{PC10, PC11, PC6},
             Alternate,
         },
         prelude::*,
         pwm_input::PwmInput,
+        rcc::Rcc,
         serial,
         stm32::{DMA2, TIM8, USART1},
         timer::Timer,
@@ -46,6 +51,7 @@ mod app {
     Monotonic config
      */
     const MONONTONIC_FREQ: u32 = 8_000_000;
+
     #[monotonic(binds = SysTick, default = true)]
     type SysMono = DwtSystick<MONONTONIC_FREQ>;
 
@@ -55,7 +61,8 @@ mod app {
     /// PWM input monitor type
     pub(crate) type PwmMonitor = PwmInput<TIM8, PC6<Alternate<3>>>;
     /// Serial connection type
-    pub(crate) type Usart1 = serial::Tx<USART1>;
+    pub(crate) type Usart1Tx = serial::Tx<USART1>;
+    pub(crate) type Usart1Rx = serial::Rx<USART1>;
     /*
     USART DMA definitions
      */
@@ -66,8 +73,12 @@ mod app {
     pub(crate) type Usart1Buf = &'static mut [u8; BUF_SIZE];
 
     /// Serial TX DMA type
-    pub(crate) type Usart1DMATransferTx =
-        Transfer<Stream7<DMA2>, Usart1, MemoryToPeripheral, Usart1Buf, 4>;
+    pub(crate) type Usart1TransferTx =
+        Transfer<Stream7<DMA2>, Usart1Tx, MemoryToPeripheral, Usart1Buf, 4>;
+
+    /// Serial RX DMA type
+    pub(crate) type Usart1TransferRx =
+        Transfer<Stream2<DMA2>, Usart1Rx, PeripheralToMemory, Usart1Buf, 4>;
 
     /* resources shared across RTIC tasks */
     #[shared]
@@ -77,6 +88,8 @@ mod app {
 
         #[lock_free]
         send: Option<TxBufferState>,
+
+        crc: Crc32,
     }
 
     /* resources local to specific RTIC tasks */
@@ -84,8 +97,11 @@ mod app {
     struct Local {
         monitor: PwmMonitor,
     }
+
+    /* the init task, called once at startup */
+
     #[init(
-        local = [tx_buf: [u8;BUF_SIZE] = [0; BUF_SIZE]]
+    local = [tx_buf: [u8; BUF_SIZE] = [0; BUF_SIZE]]
     )]
     fn init(ctx: init::Context) -> (Shared, Local, init::Monotonics) {
         /*
@@ -105,8 +121,9 @@ mod app {
         // Enable RTT logging
         rtt_init_print!();
         rprintln!("hello, world!");
+
         // retrieve the RCC register, which is needed to obtain a handle to the clocks
-        let rcc = ctx.device.RCC.constrain();
+        let rcc: Rcc = ctx.device.RCC.constrain();
         // then retreive the clocks, so we can configure timers later on
         let clocks = rcc.cfgr.freeze();
 
@@ -136,33 +153,48 @@ mod app {
         //      cycle is complete. See the reference manual's paragraphs on PWM Input.
         let monitor = Timer::new(ctx.device.TIM8, &clocks).pwm_input(240.hz(), tim8_cc1);
 
-        // configure UART4.
+        /*
+        begin USART1 config
+         */
+
         // This is the primary interface to this driver.
-        let usart1_tx = gpioa.pa9.into_alternate();
+        let usart1_tx_pin = gpioa.pa9.into_alternate();
+        let usart1_rx_pin = gpioa.pa10.into_alternate();
         let usart1_config = serial::config::Config {
-            baudrate: 9600.bps(),
+            baudrate: 115200.bps(),
             wordlength: serial::config::WordLength::DataBits8,
             parity: serial::config::Parity::ParityNone,
             stopbits: serial::config::StopBits::STOP1,
             dma: serial::config::DmaConfig::Tx,
         };
-        let usart1: Usart1 =
-            serial::Serial::tx(ctx.device.USART1, usart1_tx, usart1_config, clocks)
-                .expect("failed to configure UART4.");
+        let (usart1_tx, usart1_rx) = serial::Serial::new(
+            ctx.device.USART1,
+            (usart1_tx_pin, usart1_rx_pin),
+            usart1_config,
+            clocks,
+        )
+        .expect("failed to configure UART4.")
+        .split();
 
         // set up the DMA transfer.
         let dma2_streams: StreamsTuple<DMA2> = StreamsTuple::new(ctx.device.DMA2);
-        let dma1_stream4_config = DmaConfig::default()
+        let usart1_dma_tx_config = DmaConfig::default()
             .transfer_complete_interrupt(true)
             .memory_increment(true);
 
-        let usart1_dma_transfer_tx = Transfer::init_memory_to_peripheral(
+        let usart1_dma_transfer_tx: Usart1TransferTx = Transfer::init_memory_to_peripheral(
             dma2_streams.7,
-            usart1,
+            usart1_tx,
             ctx.local.tx_buf,
             None,
-            dma1_stream4_config,
+            usart1_dma_tx_config,
         );
+        /*
+        End USART1 configuration.
+        */
+
+        // set up the CRC32 (ethernet) peripheral
+        let crc = Crc32::new(ctx.device.CRC);
 
         // kick off the periodic task.
         periodic_emit_status::spawn_after(Seconds(1u32))
@@ -172,6 +204,7 @@ mod app {
             Shared {
                 last_observed_turret_position: 0.0,
                 send: Some(TxBufferState::Idle(usart1_dma_transfer_tx)),
+                crc,
             },
             Local { monitor },
             init::Monotonics(mono),
@@ -186,18 +219,18 @@ mod app {
     // RTIC's infrastructure.
     extern "Rust" {
         // PWM Monitor interrupt handler
-        #[task(binds=TIM8_CC, local=[monitor], shared=[last_observed_turret_position])]
+        #[task(binds = TIM8_CC, local = [monitor], shared = [last_observed_turret_position])]
         fn tim8_cc(context: tim8_cc::Context);
 
         // periodic UART telemetry output task
         #[task(
-            shared=[last_observed_turret_position, send]
-            )]
+        shared = [last_observed_turret_position, send]
+        )]
         fn periodic_emit_status(context: periodic_emit_status::Context);
 
         // when USART1 is done sending data
         #[task(
-        binds=DMA2_STREAM7,
+        binds = DMA2_STREAM7,
         shared = [send]
         )]
         fn on_dma2_stream7(context: on_dma2_stream7::Context);
