@@ -207,6 +207,7 @@ mod app {
         // set up the CRC32 (ethernet) peripheral
         let crc = Crc32::new(ctx.device.CRC);
 
+
         // kick off the periodic task.
         periodic_emit_status::spawn_after(Seconds(1u32))
             .expect("failed to kick off periodic task.");

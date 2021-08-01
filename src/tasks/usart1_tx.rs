@@ -10,6 +10,8 @@ pub(crate) fn on_usart1_txe(ctx: on_usart1_txe::Context) {
         .expect("failed to aquire buffer state");
     match dma_state {
         TxBufferState::Running(mut tx) => {
+            rprintln!("Expected interrupt. In-flight USART1_TX completed.");
+
             // turns out DMA doesn't clean up its own interrupts, so we have to do so ourselves.
             tx.clear_transfer_complete_interrupt();
             // nothing left to transfer, pause DMA.

@@ -5,6 +5,7 @@ use crate::app::{Usart1Buf, Usart1TransferTx, Usart1Tx, BUF_SIZE};
 use rtic::mutex_prelude::*;
 use serde::{Deserialize, Serialize};
 use stm32f4xx_hal::{prelude::*, crc32::Crc32};
+use core::convert::TryInto;
 
 
 const PERODIC_DELAY: Seconds = Seconds(1u32);
@@ -51,14 +52,14 @@ pub(crate) fn periodic_emit_status(
     let mut payload_buffer: [u8; BUF_SIZE] = [0xFF; BUF_SIZE];
     // define the response
     let payload = Payload {
-        turret_pos: turret_position,
+        turret_pos: 1.0,
     };
     // attempt to serialize the response
     let payload_size = match serde_json_core::to_slice(&payload, &mut payload_buffer) {
         Err(e) => {
             rprintln!("Failed to encode, error {:?}", e);
             // bail out without panicking.
-            return reschedule_periodic();
+            return;
         }
         Ok(size) => {
             size
@@ -68,24 +69,47 @@ pub(crate) fn periodic_emit_status(
     // sanity check.
     if payload_size >= BUF_SIZE - 4 {
         rprintln!("Encoded payload is too big! need at least 4 bytes to fit the CRC32!");
-        return reschedule_periodic();
+        return;
     }
 
     /*
     entering critical section
      */
-    let crc: u32 = context.shared.crc.lock(|crc: &mut Crc32| {
-        // reset the CRC peripheral
+    let checksum: u32 = context.shared.crc.lock(|crc: &mut Crc32| {
         crc.init();
-        // feed it the payload bytes, which returns the calculated CRC32 checksum.
-        crc.update_bytes(&payload_buffer[0..payload_size])
+        let slice = [0xBAADBEEF, 0xDEAD_BEEF, 0xCAFE_BABE];
+        rprintln!("CRC32 of [{:?}] := {}", slice, crc.update(&slice));
+        crc.init();
+
+
+        let slice = &payload_buffer[0..payload_size];
+        let remainder = slice.len() %4;
+        let total_words = slice.len() /4;
+        if remainder != 0{
+            rprintln!("input data length was not word-aligned, truncating to {} bytes for calculation...", total_words*4)
+        }
+        let slice = &slice[0..total_words*4];
+        let chunks = slice.chunks_exact(4);
+
+        rprintln!("checksumming {} bytes of a {} byte payload across {} words.", slice.len(), payload_size, chunks.len());
+        rprintln!("slice := {:?}", slice);
+        let mut result :u32 = 0;
+        chunks.for_each(|chunk| {
+           let word = u32::from_be_bytes(chunk.try_into().unwrap());
+            rprintln!("feeding word {:x}", word);
+            result = crc.update(&[word])
+        });
+
+
+        result
     });
+    rprintln!("CRC := {}", checksum);
     /*
     exiting critical section
      */
 
     // append the CRC32 to the end.
-    payload_buffer[payload_size..payload_size+4].copy_from_slice(&crc.to_be_bytes());
+    payload_buffer[payload_size..payload_size+4].copy_from_slice(&checksum.to_be_bytes());
     rprintln!("buffer state before cobs := {:?}", payload_buffer);
 
     // if the DMA is idle, start a new transfer.
@@ -113,14 +137,6 @@ pub(crate) fn periodic_emit_status(
         rprintln!("[WARNING] periodic ticked but a previous DMA was still active!");
     };
 
-    // serial.write_fmt(format_args!("{}", turret_position)).expect("failed to write to UARt");
-
-    reschedule_periodic();
 }
 
-fn reschedule_periodic() {
-    // re-schedule this task (become periodic)
-    crate::app::periodic_emit_status::spawn_after(PERODIC_DELAY)
-        .expect("failed to re-spawn periodic task.");
-}
 
