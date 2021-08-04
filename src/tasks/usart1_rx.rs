@@ -6,6 +6,7 @@ use stm32f4xx_hal::stm32::{DMA2, USART1};
 use crate::app::{on_usart1_idle, on_usart1_rxne, Usart1TransferRx};
 use crate::tasks::TxBufferState;
 
+/// Handles the DMA transfer complete Interrupt
 pub(crate) fn on_usart1_rxne(mut ctx: on_usart1_rxne::Context) {
     rprintln!("Full packet Recevied!");
     ctx.shared.recv.lock(|transfer: &mut Usart1TransferRx| {
@@ -13,6 +14,9 @@ pub(crate) fn on_usart1_rxne(mut ctx: on_usart1_rxne::Context) {
     });
 }
 
+/// handles USART1 IDLE interrupt
+/// This fires when the host starts sending data but then stops
+/// before the transfer completes (e.g. sends 12 bytes when BUF_SIZE > 12).
 pub(crate) fn on_usart1_idle(mut ctx: on_usart1_idle::Context) {
     rprintln!("RX line fell idle, packet recv'ed.");
     ctx.shared.recv.lock(|transfer: &mut Usart1TransferRx| {
@@ -38,6 +42,7 @@ pub(crate) unsafe fn enable_idle_interrupt() {
 }
 
 
+/// Actually handles the received packet, regardless of its source.
 fn handle_rx(transfer: &mut Usart1TransferRx) {
     // NOTE(unsafe): only unsafe in the event of a overrun in double-buffer mode.
     match unsafe {

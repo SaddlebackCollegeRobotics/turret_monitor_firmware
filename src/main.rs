@@ -6,6 +6,7 @@ use panic_rtt_target as _panic_handler;
 
 /// submodule holding task handlers
 mod tasks;
+mod datamodel;
 
 /*
  Declare the RTIC application itself.

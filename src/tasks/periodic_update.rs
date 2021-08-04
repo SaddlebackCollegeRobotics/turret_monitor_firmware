@@ -1,10 +1,12 @@
-use rtt_target::rprintln;
-
-use crate::app::{Usart1Buf, Usart1TransferTx, Usart1Tx, BUF_SIZE};
 use core::convert::TryInto;
+
 use rtic::{mutex_prelude::*, time::duration::Seconds};
+use rtt_target::rprintln;
 use serde::{Deserialize, Serialize};
 use stm32f4xx_hal::{crc32::Crc32, prelude::*};
+
+use crate::app::{BUF_SIZE, Usart1Buf, Usart1TransferTx, Usart1Tx};
+use crate::datamodel::telemetry_packet::TurretTelemetryPacket;
 
 const PERODIC_DELAY: Seconds = Seconds(1u32);
 
@@ -13,11 +15,6 @@ pub enum TxBufferState {
     Running(Usart1TransferTx),
     // In flight, but here is the next buffer to use.
     Idle(Usart1TransferTx),
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct Payload {
-    turret_pos: f32,
 }
 
 pub(crate) fn periodic_emit_status(
@@ -49,7 +46,7 @@ pub(crate) fn periodic_emit_status(
     // declare a buffer to fit the response in
     let mut payload_buffer: [u8; BUF_SIZE] = [0xFF; BUF_SIZE];
     // define the response
-    let payload = Payload { turret_pos: 1.0 };
+    let payload = TurretTelemetryPacket { turret_pos: 1.0 };
     // attempt to serialize the response
     let payload_size = match serde_json_core::to_slice(&payload, &mut payload_buffer) {
         Err(e) => {
