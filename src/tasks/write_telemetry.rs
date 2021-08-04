@@ -17,11 +17,11 @@ pub enum TxBufferState {
     Idle(Usart1TransferTx),
 }
 
-pub(crate) fn periodic_emit_status(
+pub(crate) fn write_telemetry(
     // unfortunately, as a implementation detail we cannot take an immutable reference
     // to this shared resource since another task mutates it. we have to take it mutably even
     // if we are only reading it.
-    mut context: crate::app::periodic_emit_status::Context,
+    mut context: crate::app::write_telemetry::Context,
 ) {
     rprintln!("tick!");
 

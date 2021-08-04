@@ -4,4 +4,3 @@ use serde::{Deserialize, Serialize};
 pub struct TurretTelemetryPacket {
     pub turret_pos: f32,
 }
-

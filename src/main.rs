@@ -227,7 +227,7 @@ mod app {
         let crc = Crc32::new(ctx.device.CRC);
 
         // kick off the periodic task.
-        periodic_emit_status::spawn_after(Seconds(1u32))
+        write_telemetry::spawn_after(Seconds(1u32))
             .expect("failed to kick off periodic task.");
         // lastly return the shared and local resources, as per RTIC's spec.
         (
@@ -246,7 +246,7 @@ mod app {
     }
 
     /* bring externed tasks into scope */
-    use crate::tasks::{on_usart1_rxne, on_usart1_txe, periodic_emit_status, tim8_cc, on_usart1_idle};
+    use crate::tasks::{on_usart1_rxne, on_usart1_txe, write_telemetry, tim8_cc, on_usart1_idle};
 
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
     // This allows us to specify the tasks in other modules and still work within
@@ -260,7 +260,7 @@ mod app {
         #[task(
         shared = [last_observed_turret_position, send, crc]
         )]
-        fn periodic_emit_status(context: periodic_emit_status::Context);
+        fn write_telemetry(context: write_telemetry::Context);
 
         // when USART1 is done sending data
         #[task(
