@@ -4,9 +4,9 @@
 
 use panic_rtt_target as _panic_handler;
 
+mod datamodel;
 /// submodule holding task handlers
 mod tasks;
-mod datamodel;
 
 /*
  Declare the RTIC application itself.
@@ -91,7 +91,6 @@ mod app {
         send: Option<TxBufferState>,
         crc: Crc32,
         recv: Usart1TransferRx,
-
     }
 
     /* resources local to specific RTIC tasks */
@@ -227,8 +226,7 @@ mod app {
         let crc = Crc32::new(ctx.device.CRC);
 
         // kick off the periodic task.
-        write_telemetry::spawn_after(Seconds(1u32))
-            .expect("failed to kick off periodic task.");
+        write_telemetry::spawn_after(Seconds(1u32)).expect("failed to kick off periodic task.");
         // lastly return the shared and local resources, as per RTIC's spec.
         (
             Shared {
@@ -236,17 +234,14 @@ mod app {
                 send: Some(TxBufferState::Idle(usart1_dma_transfer_tx)),
                 crc,
                 recv: usart1_dma_transfer_rx,
-
             },
-            Local {
-                monitor,
-            },
+            Local { monitor },
             init::Monotonics(mono),
         )
     }
 
     /* bring externed tasks into scope */
-    use crate::tasks::{on_usart1_rxne, on_usart1_txe, write_telemetry, tim8_cc, on_usart1_idle};
+    use crate::tasks::{on_usart1_idle, on_usart1_rxne, on_usart1_txe, tim8_cc, write_telemetry};
 
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
     // This allows us to specify the tasks in other modules and still work within

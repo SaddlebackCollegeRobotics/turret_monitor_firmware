@@ -19,8 +19,10 @@ mod tim8;
 /*
     public(crate) interface
 */
+pub(crate) use tim8::tim8_cc;
+pub(crate) use usart1_rx::{
+    clear_idle_interrupt, enable_idle_interrupt, on_usart1_idle, on_usart1_rxne,
+};
+pub(crate) use usart1_tx::on_usart1_txe;
 pub(crate) use write_telemetry::write_telemetry;
 pub use write_telemetry::TxBufferState;
-pub(crate) use tim8::tim8_cc;
-pub(crate) use usart1_rx::{on_usart1_rxne, clear_idle_interrupt, enable_idle_interrupt, on_usart1_idle};
-pub(crate) use usart1_tx::on_usart1_txe;

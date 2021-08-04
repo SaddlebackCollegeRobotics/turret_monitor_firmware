@@ -5,7 +5,7 @@ use rtt_target::rprintln;
 use serde::{Deserialize, Serialize};
 use stm32f4xx_hal::{crc32::Crc32, prelude::*};
 
-use crate::app::{BUF_SIZE, Usart1Buf, Usart1TransferTx, Usart1Tx};
+use crate::app::{Usart1Buf, Usart1TransferTx, Usart1Tx, BUF_SIZE};
 use crate::datamodel::telemetry_packet::TurretTelemetryPacket;
 
 const PERODIC_DELAY: Seconds = Seconds(1u32);

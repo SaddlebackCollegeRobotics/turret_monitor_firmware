@@ -1,6 +1,6 @@
-use rtic::{mutex_prelude::*};
+use rtic::mutex_prelude::*;
 use rtt_target::rprintln;
-use stm32f4xx_hal::dma::{Stream4, StreamX, traits::StreamISR};
+use stm32f4xx_hal::dma::{traits::StreamISR, Stream4, StreamX};
 use stm32f4xx_hal::stm32::{DMA2, USART1};
 
 use crate::app::{on_usart1_idle, on_usart1_rxne, Usart1TransferRx};
@@ -40,7 +40,6 @@ pub(crate) unsafe fn clear_idle_interrupt() {
 pub(crate) unsafe fn enable_idle_interrupt() {
     (*USART1::ptr()).cr1.modify(|_, w| w.idleie().set_bit());
 }
-
 
 /// Actually handles the received packet, regardless of its source.
 fn handle_rx(transfer: &mut Usart1TransferRx) {
