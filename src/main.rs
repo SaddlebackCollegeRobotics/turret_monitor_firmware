@@ -74,11 +74,11 @@ mod app {
 
     /// Serial TX DMA type
     pub(crate) type Usart1TransferTx =
-    Transfer<Stream7<DMA2>, Usart1Tx, MemoryToPeripheral, Usart1Buf, 4>;
+        Transfer<Stream7<DMA2>, Usart1Tx, MemoryToPeripheral, Usart1Buf, 4>;
 
     /// Serial RX DMA type
     pub(crate) type Usart1TransferRx =
-    Transfer<Stream2<DMA2>, Usart1Rx, PeripheralToMemory, Usart1Buf, 4>;
+        Transfer<Stream2<DMA2>, Usart1Rx, PeripheralToMemory, Usart1Buf, 4>;
 
     /* resources shared across RTIC tasks */
     #[shared]
@@ -88,15 +88,15 @@ mod app {
 
         #[lock_free]
         send: Option<TxBufferState>,
-
         crc: Crc32,
+        recv: Usart1TransferRx,
+
     }
 
     /* resources local to specific RTIC tasks */
     #[local]
     struct Local {
         monitor: PwmMonitor,
-        recv: Usart1TransferRx
     }
 
     /*
@@ -179,8 +179,8 @@ mod app {
             usart1_config,
             clocks,
         )
-            .expect("failed to configure UART4.")
-            .split();
+        .expect("failed to configure UART4.")
+        .split();
 
         // set up the DMA transfers.
         let dma2_streams: StreamsTuple<DMA2> = StreamsTuple::new(ctx.device.DMA2);
@@ -190,9 +190,10 @@ mod app {
             .memory_increment(true);
 
         let usart1_dma_rx_config = DmaConfig::default()
-            // .transfer_complete_interrupt(true)
-            .half_transfer_interrupt(true)
-            // .fifo_error_interrupt(true).transfer_error_interrupt(true)
+            .transfer_complete_interrupt(true)
+            // .half_transfer_interrupt(true)
+            // .fifo_error_interrupt(true)
+            // .transfer_error_interrupt(true)
             .memory_increment(true);
 
         let usart1_dma_transfer_tx: Usart1TransferTx = Transfer::init_memory_to_peripheral(
@@ -208,8 +209,12 @@ mod app {
             usart1_rx,
             ctx.local.rx_buf,
             None,
-            usart1_dma_rx_config
+            usart1_dma_rx_config,
         );
+        unsafe {
+            crate::tasks::enable_idle_interrupt();
+        }
+
         usart1_dma_transfer_rx.start(|_rx| {
             rprintln!("started RX DMA.");
         });
@@ -220,7 +225,6 @@ mod app {
         // set up the CRC32 (ethernet) peripheral
         let crc = Crc32::new(ctx.device.CRC);
 
-
         // kick off the periodic task.
         periodic_emit_status::spawn_after(Seconds(1u32))
             .expect("failed to kick off periodic task.");
@@ -230,14 +234,18 @@ mod app {
                 last_observed_turret_position: 0.0,
                 send: Some(TxBufferState::Idle(usart1_dma_transfer_tx)),
                 crc,
+                recv: usart1_dma_transfer_rx,
+
             },
-            Local { monitor, recv: usart1_dma_transfer_rx },
+            Local {
+                monitor,
+            },
             init::Monotonics(mono),
         )
     }
 
     /* bring externed tasks into scope */
-    use crate::tasks::{on_usart1_txe, periodic_emit_status, tim8_cc, on_usart1_rxne};
+    use crate::tasks::{on_usart1_rxne, on_usart1_txe, periodic_emit_status, tim8_cc, on_usart1_idle};
 
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
     // This allows us to specify the tasks in other modules and still work within
@@ -262,10 +270,14 @@ mod app {
 
         #[task(
         binds = DMA2_STREAM2,
-        shared = [crc],
-        local = [recv]
+        shared = [crc, recv],
         )]
         // when USART1 is done receiving data
         fn on_usart1_rxne(context: on_usart1_rxne::Context);
+        #[task(
+        binds = USART1,
+        shared=[recv]
+        )]
+        fn on_usart1_idle(context: on_usart1_idle::Context);
     }
 }

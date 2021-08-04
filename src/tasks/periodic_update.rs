@@ -1,12 +1,10 @@
-use rtic::time::duration::Seconds;
 use rtt_target::rprintln;
 
 use crate::app::{Usart1Buf, Usart1TransferTx, Usart1Tx, BUF_SIZE};
-use rtic::mutex_prelude::*;
-use serde::{Deserialize, Serialize};
-use stm32f4xx_hal::{prelude::*, crc32::Crc32};
 use core::convert::TryInto;
-
+use rtic::{mutex_prelude::*, time::duration::Seconds};
+use serde::{Deserialize, Serialize};
+use stm32f4xx_hal::{crc32::Crc32, prelude::*};
 
 const PERODIC_DELAY: Seconds = Seconds(1u32);
 
@@ -51,9 +49,7 @@ pub(crate) fn periodic_emit_status(
     // declare a buffer to fit the response in
     let mut payload_buffer: [u8; BUF_SIZE] = [0xFF; BUF_SIZE];
     // define the response
-    let payload = Payload {
-        turret_pos: 1.0,
-    };
+    let payload = Payload { turret_pos: 1.0 };
     // attempt to serialize the response
     let payload_size = match serde_json_core::to_slice(&payload, &mut payload_buffer) {
         Err(e) => {
@@ -61,9 +57,7 @@ pub(crate) fn periodic_emit_status(
             // bail out without panicking.
             return;
         }
-        Ok(size) => {
-            size
-        }
+        Ok(size) => size,
     };
     rprintln!("payload  before CRC := {:?}", payload_buffer);
     // sanity check.
@@ -109,7 +103,7 @@ pub(crate) fn periodic_emit_status(
      */
 
     // append the CRC32 to the end.
-    payload_buffer[payload_size..payload_size+4].copy_from_slice(&checksum.to_be_bytes());
+    payload_buffer[payload_size..payload_size + 4].copy_from_slice(&checksum.to_be_bytes());
     rprintln!("buffer state before cobs := {:?}", payload_buffer);
 
     // if the DMA is idle, start a new transfer.
@@ -122,21 +116,18 @@ pub(crate) fn periodic_emit_status(
             // in order to be safe. This was ensured during creation of the Transfer object.
             tx.next_transfer_with(|buf, _| {
                 // populate the DMA buffer with the new buffer's content
-                cobs::encode(&payload_buffer[0..payload_size+4], buf);
+                cobs::encode(&payload_buffer[0..payload_size + 4], buf);
                 // log the TX buffer
                 rprintln!("buf :: {:?}", buf);
                 // calculate the buffer's length, if only to satisfy the closure's contract.
                 let buf_len = buf.len();
                 (buf, buf_len) // Don't know what the second argument is, but it seems to be ignored.
             })
-                .expect("Something went horribly wrong setting up the transfer.");
+            .expect("Something went horribly wrong setting up the transfer.");
         }
         // update the DMA state into the running phase
         *context.shared.send = Some(TxBufferState::Running(tx));
     } else {
         rprintln!("[WARNING] periodic ticked but a previous DMA was still active!");
     };
-
 }
-
-
