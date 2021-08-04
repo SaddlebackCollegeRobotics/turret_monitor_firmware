@@ -86,7 +86,7 @@ pub(crate) fn periodic_emit_status(
         let remainder = slice.len() %4;
         let total_words = slice.len() /4;
         if remainder != 0{
-            rprintln!("input data length was not word-aligned, truncating to {} bytes for calculation...", total_words*4)
+            rprintln!("input data (length {}) was not word-aligned, truncating to {} bytes for calculation...", slice.len(), total_words*4)
         }
         let slice = &slice[0..total_words*4];
         let chunks = slice.chunks_exact(4);
@@ -95,7 +95,7 @@ pub(crate) fn periodic_emit_status(
         rprintln!("slice := {:?}", slice);
         let mut result :u32 = 0;
         chunks.for_each(|chunk| {
-           let word = u32::from_be_bytes(chunk.try_into().unwrap());
+            let word = u32::from_be_bytes(chunk.try_into().expect("unexpected misalligned word."));
             rprintln!("feeding word {:x}", word);
             result = crc.update(&[word])
         });

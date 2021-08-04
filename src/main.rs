@@ -74,11 +74,11 @@ mod app {
 
     /// Serial TX DMA type
     pub(crate) type Usart1TransferTx =
-        Transfer<Stream7<DMA2>, Usart1Tx, MemoryToPeripheral, Usart1Buf, 4>;
+    Transfer<Stream7<DMA2>, Usart1Tx, MemoryToPeripheral, Usart1Buf, 4>;
 
     /// Serial RX DMA type
     pub(crate) type Usart1TransferRx =
-        Transfer<Stream2<DMA2>, Usart1Rx, PeripheralToMemory, Usart1Buf, 4>;
+    Transfer<Stream2<DMA2>, Usart1Rx, PeripheralToMemory, Usart1Buf, 4>;
 
     /* resources shared across RTIC tasks */
     #[shared]
@@ -96,6 +96,7 @@ mod app {
     #[local]
     struct Local {
         monitor: PwmMonitor,
+        recv: Usart1TransferRx
     }
 
     /*
@@ -105,8 +106,8 @@ mod app {
 
     #[init(
     local = [
-        tx_buf: [u8; BUF_SIZE] = [0; BUF_SIZE],
-        rx_buf: [u8; BUF_SIZE] = [0; BUF_SIZE],
+    tx_buf: [u8; BUF_SIZE] = [0; BUF_SIZE],
+    rx_buf: [u8; BUF_SIZE] = [0; BUF_SIZE],
     ]
     )]
     fn init(ctx: init::Context) -> (Shared, Local, init::Monotonics) {
@@ -147,7 +148,6 @@ mod app {
         let gpioc = ctx.device.GPIOC.split();
         let gpioa = ctx.device.GPIOA.split();
         // let gpiob = ctx.device.GPIOB.split();
-        // obtain
 
         // Configure one of TIM8's CH1 pins, so that its attached to the peripheral.
         // We need to do this since the pins are multiplexed across multiple peripherals
@@ -171,7 +171,7 @@ mod app {
             wordlength: serial::config::WordLength::DataBits8,
             parity: serial::config::Parity::ParityNone,
             stopbits: serial::config::StopBits::STOP1,
-            dma: serial::config::DmaConfig::Tx,
+            dma: serial::config::DmaConfig::TxRx,
         };
         let (usart1_tx, usart1_rx) = serial::Serial::new(
             ctx.device.USART1,
@@ -179,8 +179,8 @@ mod app {
             usart1_config,
             clocks,
         )
-        .expect("failed to configure UART4.")
-        .split();
+            .expect("failed to configure UART4.")
+            .split();
 
         // set up the DMA transfers.
         let dma2_streams: StreamsTuple<DMA2> = StreamsTuple::new(ctx.device.DMA2);
@@ -190,7 +190,9 @@ mod app {
             .memory_increment(true);
 
         let usart1_dma_rx_config = DmaConfig::default()
-            .transfer_complete_interrupt(true)
+            // .transfer_complete_interrupt(true)
+            .half_transfer_interrupt(true)
+            // .fifo_error_interrupt(true).transfer_error_interrupt(true)
             .memory_increment(true);
 
         let usart1_dma_transfer_tx: Usart1TransferTx = Transfer::init_memory_to_peripheral(
@@ -200,6 +202,17 @@ mod app {
             None,
             usart1_dma_tx_config,
         );
+
+        let mut usart1_dma_transfer_rx: Usart1TransferRx = Transfer::init_peripheral_to_memory(
+            dma2_streams.2,
+            usart1_rx,
+            ctx.local.rx_buf,
+            None,
+            usart1_dma_rx_config
+        );
+        usart1_dma_transfer_rx.start(|_rx| {
+            rprintln!("started RX DMA.");
+        });
         /*
         End USART1 configuration.
         */
@@ -218,7 +231,7 @@ mod app {
                 send: Some(TxBufferState::Idle(usart1_dma_transfer_tx)),
                 crc,
             },
-            Local { monitor },
+            Local { monitor, recv: usart1_dma_transfer_rx },
             init::Monotonics(mono),
         )
     }
@@ -249,7 +262,8 @@ mod app {
 
         #[task(
         binds = DMA2_STREAM2,
-        shared = [crc]
+        shared = [crc],
+        local = [recv]
         )]
         // when USART1 is done receiving data
         fn on_usart1_rxne(context: on_usart1_rxne::Context);

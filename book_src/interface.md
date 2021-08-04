@@ -10,14 +10,24 @@ The maximum length of any packet is defined as
 ```
 
 Any packet received by this device exceeding this length will be ignored.
+This device will not emit packets larger this size. 
 
-- All packets are be COBS encoded
+- All packets are COBS encoded
 - All packets terminate with the `\x00` (null) sentinel.
-- Any bytes after the null terminator in a given transmission are reserved.
+- Any bytes after the sentinel in a given transmission up to the buffer size are reserved.
 - All packets may have up to `BUF_SIZE-5` bytes of data
-- the remaining 4 bytes are a `Big Endian` encoded `u32` CRC-32(Ethernet) checksum, followed by the null terminator.
+- the trailing 5 bytes are a `Big Endian` encoded `u32` CRC-32(Ethernet) checksum, 
+  followed by one or more sentinel bytes.
 ```
 | <data> (up to BUF_SIZE-5 bytes) | 4 byte CRC | \x00 |
+```
+Example cobs-encoded response packet:
+```
+b'\x17{"turret_pos":1.0}\x19g\xa0\x85\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+```
+Decoded it reads as (data, device crc32):
+```
+({'turret_pos': 1.0}, 426221701)
 ```
 
 ## Details on the CRC-32 checksum
