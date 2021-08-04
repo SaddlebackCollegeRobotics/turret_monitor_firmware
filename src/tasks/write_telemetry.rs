@@ -46,7 +46,7 @@ pub(crate) fn write_telemetry(
     // declare a buffer to fit the response in
     let mut payload_buffer: [u8; BUF_SIZE] = [0xFF; BUF_SIZE];
     // define the response
-    let payload = TurretTelemetryPacket { turret_pos: 1.0 };
+    let payload = TurretTelemetryPacket { turret_pos: turret_position };
     // attempt to serialize the response
     let payload_size = match serde_json_core::to_slice(&payload, &mut payload_buffer) {
         Err(e) => {

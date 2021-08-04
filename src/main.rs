@@ -241,7 +241,7 @@ mod app {
     }
 
     /* bring externed tasks into scope */
-    use crate::tasks::{on_usart1_idle, on_usart1_rxne, on_usart1_txe, tim8_cc, write_telemetry};
+    use crate::tasks::{on_usart1_idle, on_usart1_rx_dma, on_usart1_txe, tim8_cc, write_telemetry};
 
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
     // This allows us to specify the tasks in other modules and still work within
@@ -269,7 +269,7 @@ mod app {
         shared = [crc, recv],
         )]
         // when USART1 is done receiving data
-        fn on_usart1_rxne(context: on_usart1_rxne::Context);
+        fn on_usart1_rx_dma(context: on_usart1_rx_dma::Context);
         #[task(
         binds = USART1,
         shared=[recv]

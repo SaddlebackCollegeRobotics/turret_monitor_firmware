@@ -21,7 +21,7 @@ mod tim8;
 */
 pub(crate) use tim8::tim8_cc;
 pub(crate) use usart1_rx::{
-    clear_idle_interrupt, enable_idle_interrupt, on_usart1_idle, on_usart1_rxne,
+    clear_idle_interrupt, enable_idle_interrupt, on_usart1_idle, on_usart1_rx_dma,
 };
 pub(crate) use usart1_tx::on_usart1_txe;
 pub(crate) use write_telemetry::write_telemetry;

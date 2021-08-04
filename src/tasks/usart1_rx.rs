@@ -3,11 +3,11 @@ use rtt_target::rprintln;
 use stm32f4xx_hal::dma::{traits::StreamISR, Stream4, StreamX};
 use stm32f4xx_hal::stm32::{DMA2, USART1};
 
-use crate::app::{on_usart1_idle, on_usart1_rxne, Usart1TransferRx};
+use crate::app::{on_usart1_idle, on_usart1_rx_dma, Usart1TransferRx};
 use crate::tasks::TxBufferState;
 
 /// Handles the DMA transfer complete Interrupt
-pub(crate) fn on_usart1_rxne(mut ctx: on_usart1_rxne::Context) {
+pub(crate) fn on_usart1_rx_dma(mut ctx: on_usart1_rx_dma::Context) {
     rprintln!("Full packet Recevied!");
     ctx.shared.recv.lock(|transfer: &mut Usart1TransferRx| {
         handle_rx(transfer);
