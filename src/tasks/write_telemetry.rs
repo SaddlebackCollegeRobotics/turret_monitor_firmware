@@ -70,8 +70,6 @@ pub(crate) fn write_telemetry(
         crc.init();
         let slice = [0xBAADBEEF, 0xDEAD_BEEF, 0xCAFE_BABE];
         rprintln!("CRC32 of [{:?}] := {}", slice, crc.update(&slice));
-        crc.init();
-
 
         let slice = &payload_buffer[0..payload_size];
         let remainder = slice.len() %4;

@@ -69,6 +69,8 @@ mod app {
      */
     /// Size of USART1's DMA buffer
     pub(crate) const BUF_SIZE: usize = 32;
+    /// Maximum message size for messages on USART1.
+    pub(crate) const MESSAGE_SIZE: usize = BUF_SIZE-1;
 
     /// USART1's DMA buffer type
     pub(crate) type Usart1Buf = &'static mut [u8; BUF_SIZE];
@@ -190,10 +192,13 @@ mod app {
             .memory_increment(true);
 
         let usart1_dma_rx_config = DmaConfig::default()
-            .transfer_complete_interrupt(true)
-            // .half_transfer_interrupt(true)
-            // .fifo_error_interrupt(true)
-            // .transfer_error_interrupt(true)
+            // these should never fire in a well-formed packet.
+            .transfer_complete_interrupt(false)
+            .half_transfer_interrupt(false)
+            // enable the interrupt when something goes horribly wrong.
+            .fifo_error_interrupt(true)
+            .transfer_error_interrupt(true)
+            .direct_mode_error_interrupt(true)
             .memory_increment(true);
 
         let usart1_dma_transfer_tx: Usart1TransferTx = Transfer::init_memory_to_peripheral(
