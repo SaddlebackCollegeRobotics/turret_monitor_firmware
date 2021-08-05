@@ -5,10 +5,9 @@ use rtt_target::rprintln;
 use serde::{Deserialize, Serialize};
 use stm32f4xx_hal::{crc32::Crc32, prelude::*};
 
-use crate::app::{Usart1Buf, Usart1TransferTx, Usart1Tx, BUF_SIZE};
+use crate::app::{Usart1Buf, Usart1TransferTx, Usart1Tx, BUF_SIZE, MESSAGE_SIZE};
 use crate::datamodel::telemetry_packet::TurretTelemetryPacket;
 
-const PERODIC_DELAY: Seconds = Seconds(1u32);
 
 pub enum TxBufferState {
     // Ready, use the contained buffer for next transfer
@@ -111,7 +110,7 @@ pub(crate) fn write_telemetry(
             // in order to be safe. This was ensured during creation of the Transfer object.
             tx.next_transfer_with(|buf, _| {
                 // populate the DMA buffer with the new buffer's content
-                cobs::encode(&payload_buffer[0..payload_size + 4], buf);
+                postcard_cobs::encode(&payload_buffer[0..payload_size + 4], buf);
                 // log the TX buffer
                 rprintln!("buf :: {:?}", buf);
                 // calculate the buffer's length, if only to satisfy the closure's contract.
@@ -123,6 +122,6 @@ pub(crate) fn write_telemetry(
         // update the DMA state into the running phase
         *context.shared.send = Some(TxBufferState::Running(tx));
     } else {
-        rprintln!("[WARNING] periodic ticked but a previous DMA was still active!");
+        rprintln!("[WARNING] write_Telemetry called but a previous USART1 DMA was still active!");
     };
 }

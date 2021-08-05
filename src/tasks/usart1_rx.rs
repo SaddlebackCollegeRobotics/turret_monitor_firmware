@@ -3,7 +3,7 @@ use rtt_target::rprintln;
 use stm32f4xx_hal::dma::{traits::*, Stream2};
 use stm32f4xx_hal::stm32::{DMA2, USART1};
 
-use crate::app::{on_usart1_idle, on_usart1_rx_dma, Usart1TransferRx, {MESSAGE_SIZE, BUF_SIZE}};
+use crate::app::{on_usart1_idle, on_usart1_rx_dma, Usart1TransferRx, {MESSAGE_SIZE, BUF_SIZE}, Usart1Buf};
 use crate::tasks::TxBufferState;
 
 /// Handles the DMA transfer complete Interrupt
@@ -23,16 +23,13 @@ pub(crate) fn on_usart1_idle(mut ctx: on_usart1_idle::Context) {
 
 /// Actually handles the received packet, regardless of its source.
 fn handle_rx(transfer: &mut Usart1TransferRx) {
-
     let remaining_transfers = Stream2::<DMA2>::get_number_of_transfers() as usize;
     let bytes_transfered = BUF_SIZE - remaining_transfers;
 
     rprintln!("RX dma remaining transfers := {},bytes transfered:={}", remaining_transfers, bytes_transfered);
 
-    // if bytes_transfered > MESSAGE_SIZE{
-    //     rprintln!("Someone sent a bigger message frame than allowed.");
-    // };
-    let mut packet = [0u8;BUF_SIZE];
+
+    let mut packet = [0u8; BUF_SIZE];
     // NOTE(unsafe): only unsafe in the event of a overrun in double-buffer mode.
     match unsafe {
         // set up the next transfer, and copy the previous transfer to a different buffer for
@@ -57,6 +54,16 @@ fn handle_rx(transfer: &mut Usart1TransferRx) {
                     transfer_error,
                     fifo_error
                 );
+            } else {
+                if bytes_transfered > MESSAGE_SIZE {
+                    rprintln!("Someone sent a bigger message frame than allowed.");
+                } else {
+                    if let Ok(n) = postcard_cobs::decode(&buf[..bytes_transfered], &mut packet) {
+                        rprintln!("successfully decoded {} bytes.", n);
+                    } else {
+                        rprintln!("failed to decode.");
+                    };
+                };
             };
             (buf, len)
         })
@@ -92,4 +99,24 @@ pub(crate) unsafe fn clear_idle_interrupt() {
 /// read/modify/write cycle
 pub(crate) unsafe fn enable_idle_interrupt() {
     (*USART1::ptr()).cr1.modify(|_, w| w.idleie().set_bit());
+}
+
+fn process_mabie_packet(input_buffer: Usart1Buf) -> Result<usize, ()> {
+    let mut buffer: [u8; BUF_SIZE] = [0; BUF_SIZE];
+    let mut decoder = postcard_cobs::CobsDecoder::new(&mut buffer);
+
+    match decoder.push(input_buffer) {
+        Ok(None) => {
+            rprintln!("failed to decode packet, COBS required more bytes.");
+            Err(())
+        }
+        Ok(Some((payload_length, _))) => {
+            Ok(payload_length)
+        }
+        Err(decoded_length) => {
+            rprintln!("failed to decode packet, failed after {} bytes.", decoded_length);
+            Err(())
+        }
+    }
+
 }
