@@ -21,4 +21,16 @@ it is necessary that the telemetry transmitter runs asynchronously to the main r
   - Triggers a bookkeeping task to prevent concurrent DMA requests against the same 
     memory and device.
   - Interrupt handled via the `on_dma2_stream7` task.
+
+# RX DMA
+- According to RM0390 rev 5, `USART1_RX` is mapped to `DMA2`, Stream 2, channel 4.
+- The request kind is `Peripheral to Memory`.
+- Given the relatively low period of this task, we configure for `single buffer` mode.
+  - This simplifies satisfying safety contracts.
+- Since we are writing an entire buffer, DMA is configured to increment the buffer address.
+  - (Otherwise it just writes the first byte over and over again.)
+- USART1 is configured to fire on USART IDLE, which occurs immediately the host stops sending data (after sending at least one byte).
+  - Triggers a bookkeeping task to prevent concurrent DMA requests against the same
+    memory and device.
+  - Interrupt handled via the `on_usart1_idle` task.
   

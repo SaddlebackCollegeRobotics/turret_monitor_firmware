@@ -6,7 +6,7 @@ The primary communication interface to this firmware is via the `USART1` device.
 # Packet structure
 The maximum length of any packet is defined as
 ```rs
-{{#include ../src/main.rs:70}}
+{{#include ../src/main.rs:70:73}}
 ```
 
 Any packet received by this device exceeding this length will be ignored.
@@ -42,3 +42,32 @@ This means, if the payload size is 18, **only the first 16 bytes** (4 Big Endian
 # Status response structure
 The payload of a status response is a json-encoded object representing the current device 
 observations.
+
+## Request
+Requests must be a well-formed packet as defined in [packet structure](#packet-structure).
+
+> Malformed packets will be ignored by the device.
+
+The request object is defined below, though at the time of writing the `kind` field is reserved.
+```rs
+{{#include ../src/datamodel/request.rs}}
+```
+### Example request payload
+```python
+payload = b'\x10{"kind": 0}9V\xce\xe4'
+```
+
+
+## Response
+The response will be a well-formed packet.
+
+The response object is defined below.
+```rs
+{{#include ../src/datamodel/telemetry_packet.rs}}
+```
+
+### Example response payload
+```python
+b'\x17{"turret_pos":0.0}\xcb~aY\x00'
+# data bytes := b'{"turret_pos":0.0}', device CRC := 3414057305
+```
