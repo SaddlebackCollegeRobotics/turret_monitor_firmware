@@ -115,33 +115,27 @@ pub(crate) unsafe fn enable_idle_interrupt() {
 fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), ()> {
     let mut buffer: [u8; BUF_SIZE] = [0; BUF_SIZE];
 
-    if let Ok(bytes_decoded) = postcard_cobs::decode(input_buffer[..input_buffer.spl], &mut buffer) {
-        if bytes_decoded < 5 {
-            rprintln!("[ERROR] decoded packet was too small to fit any data.")
-        }
-        rprintln!(
-            "successfully decoded a cobs frame {} bytes long.",
-            bytes_decoded
-        );
-        let payload = &buffer[..bytes_decoded - 4];
-        let sender_crc: u32 = u32::from_be_bytes(
-            buffer[bytes_decoded - 4..bytes_decoded]
-                .try_into()
-                .expect("failed to interpret sender CRC as a u32."),
-        );
-        let device_crc = compute_crc(&buffer, crc);
-        if device_crc != sender_crc{
-            rprintln!("[ERROR] Device crc {} != sender crc {}", device_crc, sender_crc);
-            return Err(());
-        }
+    let mut decoder = postcard_cobs::CobsDecoder::new(&mut buffer);
 
-        rprintln!("validated payload := {:?}", payload);
-    } else {
-        rprintln!("failed to COBS decodepacket!");
-        return Err(());
-    };
+    if let Ok(n) = match decoder.push(input_buffer) {
+        Ok(None) => {
+            rprintln!("[ERROR] Decoder demanded more bytes than we can feed it.");
+            Err(())
+        }
+        Ok(Some((message_length, _))) =>{
+            rprintln!("Decode successful, decoded {} bytes.", message_length);
+            Ok(message_length)
+        }
+        Err(j) => {
+            rprintln!("[ERROR] Decoder errored after {} bytes.", j);
+            Err(())
+        }
+    } {
 
-    Ok(())
+    }
+
+    todo!()
+
 }
 
 pub(crate) fn compute_crc(buffer: &[u8], crc: &mut Crc32) -> u32 {
