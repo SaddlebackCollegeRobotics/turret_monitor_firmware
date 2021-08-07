@@ -6,9 +6,10 @@ module. This is disadvantagous for many reasons, including maintainability and o
 
 In `main.rs`, you may observe like this
 ```rust
-{{#include ../../src/main.rs:7:10}}
+{{#include ../../src/main.rs:248:249}}
     // ...
-{{#include ../../src/main.rs:66:69}}
+{{#include ../../src/main.rs:254:257}}
+        // ...
 ```
 
 ## What is `extern "Rust"` doing here?`
