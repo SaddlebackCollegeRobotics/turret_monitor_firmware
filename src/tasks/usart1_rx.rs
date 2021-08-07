@@ -10,6 +10,7 @@ use crate::tasks::TxBufferState;
 use core::convert::TryInto;
 use stm32f4xx_hal::crc32::Crc32;
 use core::ops::Index;
+use crate::datamodel::request::Request;
 
 /// Handles the DMA transfer complete Interrupt
 pub(crate) fn on_usart1_rx_dma(_ctx: on_usart1_rx_dma::Context) {
@@ -142,6 +143,10 @@ fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), ()> 
             Err(())
         } else {
             rprintln!("RX checksum passed.");
+            let request_result  : serde_json_core::de::Result<(Request, usize)>=  serde_json_core::from_slice(data);
+            if let Ok((request, size))= request_result {
+                rprintln!("successfully deserialized request {:?} of size {}", request, size);
+            }
             Ok(())
         }
     } else {
