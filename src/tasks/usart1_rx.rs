@@ -3,8 +3,12 @@ use rtt_target::rprintln;
 use stm32f4xx_hal::dma::{traits::*, Stream2};
 use stm32f4xx_hal::stm32::{DMA2, USART1};
 
-use crate::app::{on_usart1_idle, on_usart1_rx_dma, Usart1TransferRx, {MESSAGE_SIZE, BUF_SIZE}, Usart1Buf};
+use crate::app::{
+    on_usart1_idle, on_usart1_rx_dma, Usart1Buf, Usart1TransferRx, {BUF_SIZE, MESSAGE_SIZE},
+};
 use crate::tasks::TxBufferState;
+use core::convert::TryInto;
+use stm32f4xx_hal::crc32::Crc32;
 
 /// Handles the DMA transfer complete Interrupt
 pub(crate) fn on_usart1_rx_dma(_ctx: on_usart1_rx_dma::Context) {
@@ -14,20 +18,23 @@ pub(crate) fn on_usart1_rx_dma(_ctx: on_usart1_rx_dma::Context) {
 /// handles USART1 IDLE interrupt
 /// This fires when the host starts sending data but then stops
 /// before the transfer completes (e.g. sends 12 bytes when BUF_SIZE > 12).
-pub(crate) fn on_usart1_idle(mut ctx: on_usart1_idle::Context) {
+pub(crate) fn on_usart1_idle(ctx: on_usart1_idle::Context) {
     rprintln!("RX line fell idle, packet recv'ed.");
-    ctx.shared.recv.lock(|transfer: &mut Usart1TransferRx| {
-        handle_rx(transfer);
+    (ctx.shared.recv, ctx.shared.crc).lock(|transfer: &mut Usart1TransferRx, crc: &mut Crc32| {
+            handle_rx(transfer, crc);
     });
 }
 
 /// Actually handles the received packet, regardless of its source.
-fn handle_rx(transfer: &mut Usart1TransferRx) {
+fn handle_rx(transfer: &mut Usart1TransferRx, crc: &mut Crc32) {
     let remaining_transfers = Stream2::<DMA2>::get_number_of_transfers() as usize;
     let bytes_transfered = BUF_SIZE - remaining_transfers;
 
-    rprintln!("RX dma remaining transfers := {},bytes transfered:={}", remaining_transfers, bytes_transfered);
-
+    rprintln!(
+        "RX dma remaining transfers := {},bytes transfered:={}",
+        remaining_transfers,
+        bytes_transfered
+    );
 
     let mut packet = [0u8; BUF_SIZE];
     // NOTE(unsafe): only unsafe in the event of a overrun in double-buffer mode.
@@ -54,17 +61,10 @@ fn handle_rx(transfer: &mut Usart1TransferRx) {
                     transfer_error,
                     fifo_error
                 );
-            } else {
-                if bytes_transfered > MESSAGE_SIZE {
-                    rprintln!("Someone sent a bigger message frame than allowed.");
-                } else {
-                    if let Ok(n) = postcard_cobs::decode(&buf[..bytes_transfered], &mut packet) {
-                        rprintln!("successfully decoded {} bytes.", n);
-                    } else {
-                        rprintln!("failed to decode.");
-                    };
-                };
             };
+            // Copy DMA buffer to a different location so DMA can be restarted while
+            // we process the packet.
+            packet.copy_from_slice(buf);
             (buf, len)
         })
     } {
@@ -74,6 +74,17 @@ fn handle_rx(transfer: &mut Usart1TransferRx) {
         Err(err) => {
             rprintln!("Error occured RX DMA reconfigure. e:={:?}", err)
         }
+    }
+    // Now that the RXed buffer is copied into our local buffer, and the DMA is reconfigured
+    //
+    let result = if bytes_transfered > MESSAGE_SIZE {
+        rprintln!("Someone sent a bigger message frame than allowed.");
+        Err(())
+    } else {
+            process_mabie_packet(&packet,crc )
+    };
+    if let Err(_) = result {
+        rprintln!("[ERROR] Something went horribly wrong processing packet!");
     }
 
     transfer.clear_interrupts();
@@ -101,22 +112,58 @@ pub(crate) unsafe fn enable_idle_interrupt() {
     (*USART1::ptr()).cr1.modify(|_, w| w.idleie().set_bit());
 }
 
-fn process_mabie_packet(input_buffer: Usart1Buf) -> Result<usize, ()> {
+fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), ()> {
     let mut buffer: [u8; BUF_SIZE] = [0; BUF_SIZE];
-    let mut decoder = postcard_cobs::CobsDecoder::new(&mut buffer);
 
-    match decoder.push(input_buffer) {
-        Ok(None) => {
-            rprintln!("failed to decode packet, COBS required more bytes.");
-            Err(())
+    if let Ok(bytes_decoded) = postcard_cobs::decode(input_buffer[..input_buffer.spl], &mut buffer) {
+        if bytes_decoded < 5 {
+            rprintln!("[ERROR] decoded packet was too small to fit any data.")
         }
-        Ok(Some((payload_length, _))) => {
-            Ok(payload_length)
+        rprintln!(
+            "successfully decoded a cobs frame {} bytes long.",
+            bytes_decoded
+        );
+        let payload = &buffer[..bytes_decoded - 4];
+        let sender_crc: u32 = u32::from_be_bytes(
+            buffer[bytes_decoded - 4..bytes_decoded]
+                .try_into()
+                .expect("failed to interpret sender CRC as a u32."),
+        );
+        let device_crc = compute_crc(&buffer, crc);
+        if device_crc != sender_crc{
+            rprintln!("[ERROR] Device crc {} != sender crc {}", device_crc, sender_crc);
+            return Err(());
         }
-        Err(decoded_length) => {
-            rprintln!("failed to decode packet, failed after {} bytes.", decoded_length);
-            Err(())
-        }
+
+        rprintln!("validated payload := {:?}", payload);
+    } else {
+        rprintln!("failed to COBS decodepacket!");
+        return Err(());
+    };
+
+    Ok(())
+}
+
+pub(crate) fn compute_crc(buffer: &[u8], crc: &mut Crc32) -> u32 {
+    crc.init();
+    let payload_size = buffer.len();
+    let remainder = buffer.len() % 4;
+    let total_words = buffer.len() / 4;
+    if remainder != 0 {
+        rprintln!("input data (length {}) was not word-aligned, truncating to {} bytes for calculation...", buffer.len(), total_words*4)
     }
+    let buffer = &buffer[0..total_words * 4];
+    let chunks = buffer.chunks_exact(4);
 
+    rprintln!("checksumming {} bytes of a {} byte payload across {} words.", buffer.len(), payload_size, chunks.len());
+    rprintln!("buffer := {:?}", buffer);
+    let mut result: u32 = 0;
+    chunks.for_each(|chunk| {
+        let word = u32::from_be_bytes(chunk.try_into().expect("unexpected misalligned word."));
+        rprintln!("feeding word {:x}", word);
+        result = crc.update(&[word])
+    });
+
+
+    result
 }

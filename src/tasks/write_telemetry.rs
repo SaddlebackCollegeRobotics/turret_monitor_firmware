@@ -7,7 +7,7 @@ use stm32f4xx_hal::{crc32::Crc32, prelude::*};
 
 use crate::app::{Usart1Buf, Usart1TransferTx, Usart1Tx, BUF_SIZE, MESSAGE_SIZE};
 use crate::datamodel::telemetry_packet::TurretTelemetryPacket;
-
+use crate::tasks::usart1_rx::compute_crc;
 
 pub enum TxBufferState {
     // Ready, use the contained buffer for next transfer
@@ -45,7 +45,9 @@ pub(crate) fn write_telemetry(
     // declare a buffer to fit the response in
     let mut payload_buffer: [u8; BUF_SIZE] = [0xFF; BUF_SIZE];
     // define the response
-    let payload = TurretTelemetryPacket { turret_pos: turret_position };
+    let payload = TurretTelemetryPacket {
+        turret_pos: turret_position,
+    };
     // attempt to serialize the response
     let payload_size = match serde_json_core::to_slice(&payload, &mut payload_buffer) {
         Err(e) => {
@@ -57,7 +59,7 @@ pub(crate) fn write_telemetry(
     };
     rprintln!("payload  before CRC := {:?}", payload_buffer);
     // sanity check.
-    if payload_size >= BUF_SIZE - 4 {
+    if payload_size > MESSAGE_SIZE - 4 {
         rprintln!("Encoded payload is too big! need at least 4 bytes to fit the CRC32!");
         return;
     }
@@ -66,30 +68,7 @@ pub(crate) fn write_telemetry(
     entering critical section
      */
     let checksum: u32 = context.shared.crc.lock(|crc: &mut Crc32| {
-        crc.init();
-        let slice = [0xBAADBEEF, 0xDEAD_BEEF, 0xCAFE_BABE];
-        rprintln!("CRC32 of [{:?}] := {}", slice, crc.update(&slice));
-
-        let slice = &payload_buffer[0..payload_size];
-        let remainder = slice.len() %4;
-        let total_words = slice.len() /4;
-        if remainder != 0{
-            rprintln!("input data (length {}) was not word-aligned, truncating to {} bytes for calculation...", slice.len(), total_words*4)
-        }
-        let slice = &slice[0..total_words*4];
-        let chunks = slice.chunks_exact(4);
-
-        rprintln!("checksumming {} bytes of a {} byte payload across {} words.", slice.len(), payload_size, chunks.len());
-        rprintln!("slice := {:?}", slice);
-        let mut result :u32 = 0;
-        chunks.for_each(|chunk| {
-            let word = u32::from_be_bytes(chunk.try_into().expect("unexpected misalligned word."));
-            rprintln!("feeding word {:x}", word);
-            result = crc.update(&[word])
-        });
-
-
-        result
+        compute_crc(&payload_buffer,crc)
     });
     rprintln!("CRC := {}", checksum);
     /*

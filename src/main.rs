@@ -70,7 +70,7 @@ mod app {
     /// Size of USART1's DMA buffer
     pub(crate) const BUF_SIZE: usize = 32;
     /// Maximum message size for messages on USART1.
-    pub(crate) const MESSAGE_SIZE: usize = BUF_SIZE-1;
+    pub(crate) const MESSAGE_SIZE: usize = BUF_SIZE - 1;
 
     /// USART1's DMA buffer type
     pub(crate) type Usart1Buf = &'static mut [u8; BUF_SIZE];
@@ -277,7 +277,7 @@ mod app {
         fn on_usart1_rx_dma(context: on_usart1_rx_dma::Context);
         #[task(
         binds = USART1,
-        shared=[recv]
+        shared=[recv, crc]
         )]
         fn on_usart1_idle(context: on_usart1_idle::Context);
     }
