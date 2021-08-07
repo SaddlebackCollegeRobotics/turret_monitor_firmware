@@ -9,6 +9,7 @@ use crate::app::{
 use crate::tasks::TxBufferState;
 use core::convert::TryInto;
 use stm32f4xx_hal::crc32::Crc32;
+use core::ops::Index;
 
 /// Handles the DMA transfer complete Interrupt
 pub(crate) fn on_usart1_rx_dma(_ctx: on_usart1_rx_dma::Context) {
@@ -131,10 +132,22 @@ fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), ()> 
             Err(())
         }
     } {
+        let (data, crc_bytes) = (&buffer[..n-4], &buffer[n-4..n]);
+        rprintln!("crc buffer := {:?}", crc_bytes);
+        let sender_crc = u32::from_be_bytes(crc_bytes.try_into().expect("failed to interpret sender CRC as a u32!"));
+        let device_crc = compute_crc(data, crc);
 
+        if sender_crc != device_crc {
+            rprintln!("[ERROR] Sender CRC {} != Device CRC {}", sender_crc, device_crc);
+            Err(())
+        } else {
+            rprintln!("RX checksum passed.");
+            Ok(())
+        }
+    } else {
+        Err(())
     }
 
-    todo!()
 
 }
 
