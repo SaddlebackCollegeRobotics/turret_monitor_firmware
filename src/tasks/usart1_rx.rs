@@ -10,7 +10,7 @@ use crate::tasks::TxBufferState;
 use core::convert::TryInto;
 use stm32f4xx_hal::crc32::Crc32;
 use core::ops::Index;
-use crate::datamodel::request::Request;
+use crate::datamodel::{request::Request, rx_errors::RxError};
 
 /// Handles the DMA transfer complete Interrupt
 pub(crate) fn on_usart1_rx_dma(_ctx: on_usart1_rx_dma::Context) {
@@ -40,7 +40,7 @@ fn handle_rx(transfer: &mut Usart1TransferRx, crc: &mut Crc32) {
 
     let mut packet = [0u8; BUF_SIZE];
     // NOTE(unsafe): only unsafe in the event of a overrun in double-buffer mode.
-    match unsafe {
+    if let Err(e) = unsafe {
         // set up the next transfer, and copy the previous transfer to a different buffer for
         // further processing
         transfer.next_transfer_with(|buf, _current_buffer| {
@@ -63,30 +63,28 @@ fn handle_rx(transfer: &mut Usart1TransferRx, crc: &mut Crc32) {
                     transfer_error,
                     fifo_error
                 );
-            };
+            }
             // Copy DMA buffer to a different location so DMA can be restarted while
             // we process the packet.
             packet.copy_from_slice(buf);
             (buf, len)
         })
     } {
-        Ok(x) => {
-            rprintln!("successfully reconfigured RX DMA, x = {}", x)
-        }
-        Err(err) => {
-            rprintln!("Error occured RX DMA reconfigure. e:={:?}", err)
-        }
+        rprintln!("something went horribly wrong in DMA reconfig!");
+        transfer.clear_interrupts();
+        unsafe { clear_idle_interrupt() };
+        return;
     }
     // Now that the RXed buffer is copied into our local buffer, and the DMA is reconfigured
     //
     let result = if bytes_transfered > MESSAGE_SIZE {
         rprintln!("Someone sent a bigger message frame than allowed.");
-        Err(())
+        Err(RxError::BufferOverflow)
     } else {
             process_mabie_packet(&packet,crc )
     };
-    if let Err(_) = result {
-        rprintln!("[ERROR] Something went horribly wrong processing packet!");
+    if let Err(e) = result {
+        rprintln!("[ERROR] Something went horribly wrong processing packet {:?}!", e);
     }
 
     transfer.clear_interrupts();
@@ -114,7 +112,7 @@ pub(crate) unsafe fn enable_idle_interrupt() {
     (*USART1::ptr()).cr1.modify(|_, w| w.idleie().set_bit());
 }
 
-fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), ()> {
+fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), RxError> {
     let mut buffer: [u8; BUF_SIZE] = [0; BUF_SIZE];
 
     let mut decoder = postcard_cobs::CobsDecoder::new(&mut buffer);
@@ -122,7 +120,7 @@ fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), ()> 
     if let Ok(n) = match decoder.push(input_buffer) {
         Ok(None) => {
             rprintln!("[ERROR] Decoder demanded more bytes than we can feed it.");
-            Err(())
+            Err(RxError::CobsDecoderNeededMoreBytes)
         }
         Ok(Some((message_length, _))) =>{
             rprintln!("Decode successful, decoded {} bytes.", message_length);
@@ -130,7 +128,7 @@ fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), ()> 
         }
         Err(j) => {
             rprintln!("[ERROR] Decoder errored after {} bytes.", j);
-            Err(())
+            Err(RxError::CobsDecoderError(j))
         }
     } {
         let (data, crc_bytes) = (&buffer[..n-4], &buffer[n-4..n]);
@@ -140,7 +138,7 @@ fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), ()> 
 
         if sender_crc != device_crc {
             rprintln!("[ERROR] Sender CRC {} != Device CRC {}", sender_crc, device_crc);
-            Err(())
+            Err(RxError::InvalidSenderCrc)
         } else {
             rprintln!("RX checksum passed.");
             let request_result  : serde_json_core::de::Result<(Request, usize)>=  serde_json_core::from_slice(data);
@@ -150,11 +148,11 @@ fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), ()> 
                 Ok(())
             } else {
                 rprintln!("[error] failed to deserialize well-formed packet!");
-                Err(())
+                Err(RxError::FailedJsonDeserialize)
             }
         }
     } else {
-        Err(())
+        Err(RxError::CobsDecoderPushFailed)
     }
 
 
