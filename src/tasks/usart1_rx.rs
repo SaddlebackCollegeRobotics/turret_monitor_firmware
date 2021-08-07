@@ -146,8 +146,12 @@ fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), ()> 
             let request_result  : serde_json_core::de::Result<(Request, usize)>=  serde_json_core::from_slice(data);
             if let Ok((request, size))= request_result {
                 rprintln!("successfully deserialized request {:?} of size {}", request, size);
+                crate::app::write_telemetry::spawn().expect("failed to spawn telemetry writer.");
+                Ok(())
+            } else {
+                rprintln!("[error] failed to deserialize well-formed packet!");
+                Err(())
             }
-            Ok(())
         }
     } else {
         Err(())

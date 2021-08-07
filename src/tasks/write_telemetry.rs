@@ -68,7 +68,7 @@ pub(crate) fn write_telemetry(
     entering critical section
      */
     let checksum: u32 = context.shared.crc.lock(|crc: &mut Crc32| {
-        compute_crc(&payload_buffer,crc)
+        compute_crc(&payload_buffer[..payload_size],crc)
     });
     rprintln!("CRC := {}", checksum);
     /*
