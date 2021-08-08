@@ -13,6 +13,10 @@ cortex-m = "0.7.3"
 embedded-dma = "0.1.2"
 serde-json-core = "0.4.0"
 
+[dependencies.serde_cbor]
+version = "0.11.1"
+default-features = false
+
 [dependencies.postcard-cobs]
 version = ">=0.2" # https://github.com/ferrous-systems/cobs.rs/pull/2
 default-features = false

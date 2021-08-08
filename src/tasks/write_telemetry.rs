@@ -3,6 +3,7 @@ use core::convert::TryInto;
 use rtic::{mutex_prelude::*, time::duration::Seconds};
 use rtt_target::rprintln;
 use serde::{Deserialize, Serialize};
+use serde_cbor::ser::{SliceWrite,Serializer};
 use stm32f4xx_hal::{crc32::Crc32, prelude::*};
 
 use crate::app::{Usart1Buf, Usart1TransferTx, Usart1Tx, BUF_SIZE, MESSAGE_SIZE};
@@ -48,15 +49,16 @@ pub(crate) fn write_telemetry(
     let payload = TurretTelemetryPacket {
         turret_pos: turret_position,
     };
-    // attempt to serialize the response
-    let payload_size = match serde_json_core::to_slice(&payload, &mut payload_buffer) {
-        Err(e) => {
-            rprintln!("Failed to encode, error {:?}", e);
-            // bail out without panicking.
-            return;
-        }
-        Ok(size) => size,
-    };
+    // set up serialization
+    let mut serializer = Serializer::new(SliceWrite::new(&mut payload_buffer));
+    // serialize payload
+    if let Err(e) = payload.serialize(&mut serializer) {
+        rprintln!("Failed to encode, error {:?}", e);
+        return;
+    }
+    //
+    let payload_size = serializer.into_inner().bytes_written();
+
     rprintln!("payload  before CRC := {:?}", payload_buffer);
     // sanity check.
     if payload_size > MESSAGE_SIZE - 4 {

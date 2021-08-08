@@ -70,7 +70,7 @@ fn handle_rx(transfer: &mut Usart1TransferRx, crc: &mut Crc32) {
             (buf, len)
         })
     } {
-        rprintln!("something went horribly wrong in DMA reconfig!");
+        rprintln!("something went horribly wrong in DMA reconfig! {:?}", e);
         transfer.clear_interrupts();
         unsafe { clear_idle_interrupt() };
         return;
@@ -131,9 +131,10 @@ fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), RxEr
             Err(RxError::CobsDecoderError(j))
         }
     } {
-        let (data, crc_bytes) = (&buffer[..n-4], &buffer[n-4..n]);
+        let crc_bytes = &buffer[n-4..n];
         rprintln!("crc buffer := {:?}", crc_bytes);
         let sender_crc = u32::from_be_bytes(crc_bytes.try_into().expect("failed to interpret sender CRC as a u32!"));
+        let data = &mut buffer[..n-4];
         let device_crc = compute_crc(data, crc);
 
         if sender_crc != device_crc {
@@ -141,14 +142,22 @@ fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), RxEr
             Err(RxError::InvalidSenderCrc)
         } else {
             rprintln!("RX checksum passed.");
-            let request_result  : serde_json_core::de::Result<(Request, usize)>=  serde_json_core::from_slice(data);
-            if let Ok((request, size))= request_result {
-                rprintln!("successfully deserialized request {:?} of size {}", request, size);
-                crate::app::write_telemetry::spawn().expect("failed to spawn telemetry writer.");
+            // Deserialize internal CBOR packet.
+            // Note: the data buffer needs to be mutable as an implementation detail of CBOR.
+            let request_result: serde_cbor::Result<Request> = serde_cbor::de::from_mut_slice(data );
+
+            if let Ok(request)= request_result {
+                rprintln!("successfully deserialized request {:?}", request);
+                // Spawn the telemetry worker
+                // Note: we remap the error here to our internal enum for consistancy.
+                crate::app::write_telemetry::spawn().map_err(|e| {
+                    rprintln!("[error] failed to spawn telemetry writer with err {:?}", e);
+                    RxError::FailedTelemetrySpawn
+                } )?;
                 Ok(())
             } else {
                 rprintln!("[error] failed to deserialize well-formed packet!");
-                Err(RxError::FailedJsonDeserialize)
+                Err(RxError::FailedDeserialize)
             }
         }
     } else {
