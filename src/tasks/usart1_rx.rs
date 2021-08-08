@@ -22,6 +22,7 @@ pub(crate) fn on_usart1_rx_dma(_ctx: on_usart1_rx_dma::Context) {
 /// before the transfer completes (e.g. sends 12 bytes when BUF_SIZE > 12).
 pub(crate) fn on_usart1_idle(ctx: on_usart1_idle::Context) {
     rprintln!("RX line fell idle, packet recv'ed.");
+    // acquire lock to shared resources, then call the actual handler.
     (ctx.shared.recv, ctx.shared.crc).lock(|transfer: &mut Usart1TransferRx, crc: &mut Crc32| {
             handle_rx(transfer, crc);
     });
@@ -117,6 +118,7 @@ fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), RxEr
 
     let mut decoder = postcard_cobs::CobsDecoder::new(&mut buffer);
 
+    // decode the COBS frame into the buffer
     if let Ok(n) = match decoder.push(input_buffer) {
         Ok(None) => {
             rprintln!("[ERROR] Decoder demanded more bytes than we can feed it.");
@@ -131,12 +133,15 @@ fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), RxEr
             Err(RxError::CobsDecoderError(j))
         }
     } {
+        // If decoding succeeded, then fetch the sender CRC.
         let crc_bytes = &buffer[n-4..n];
         rprintln!("crc buffer := {:?}", crc_bytes);
         let sender_crc = u32::from_be_bytes(crc_bytes.try_into().expect("failed to interpret sender CRC as a u32!"));
+        // Then compute the device CRC.
         let data = &mut buffer[..n-4];
         let device_crc = compute_crc(data, crc);
 
+        // Ensure the two match..
         if sender_crc != device_crc {
             rprintln!("[ERROR] Sender CRC {} != Device CRC {}", sender_crc, device_crc);
             Err(RxError::InvalidSenderCrc)
@@ -146,6 +151,7 @@ fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), RxEr
             // Note: the data buffer needs to be mutable as an implementation detail of CBOR.
             let request_result: serde_cbor::Result<Request> = serde_cbor::de::from_mut_slice(data );
 
+            // Check that the deserialization was successful.
             if let Ok(request)= request_result {
                 rprintln!("successfully deserialized request {:?}", request);
                 // Spawn the telemetry worker
