@@ -3,7 +3,7 @@ use core::convert::TryInto;
 use rtic::{mutex_prelude::*, time::duration::Seconds};
 use rtt_target::rprintln;
 use serde::{Deserialize, Serialize};
-use serde_cbor::ser::{SliceWrite,Serializer};
+use serde_cbor::ser::{Serializer, SliceWrite};
 use stm32f4xx_hal::{crc32::Crc32, prelude::*};
 
 use crate::app::{Usart1Buf, Usart1TransferTx, Usart1Tx, BUF_SIZE, MESSAGE_SIZE};
@@ -69,9 +69,10 @@ pub(crate) fn write_telemetry(
     /*
     entering critical section
      */
-    let checksum: u32 = context.shared.crc.lock(|crc: &mut Crc32| {
-        compute_crc(&payload_buffer[..payload_size],crc)
-    });
+    let checksum: u32 = context
+        .shared
+        .crc
+        .lock(|crc: &mut Crc32| compute_crc(&payload_buffer[..payload_size], crc));
     rprintln!("CRC := {}", checksum);
     /*
     exiting critical section
