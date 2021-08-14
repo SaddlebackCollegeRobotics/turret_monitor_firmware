@@ -1,4 +1,3 @@
-
 #[derive(Debug)]
 pub enum RxError {
     CobsDecoderNeededMoreBytes,
@@ -6,7 +5,7 @@ pub enum RxError {
     CobsDecoderPushFailed,
     InvalidSenderCrc,
     FailedTelemetrySpawn,
-    FailedJsonDeserialize,
+    FailedDeserialize,
     BufferOverflow,
     DmaReconfigFailed,
     DmaTransferFailed,

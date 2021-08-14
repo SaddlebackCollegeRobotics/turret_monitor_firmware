@@ -41,10 +41,11 @@ mod app {
             Alternate,
         },
         prelude::*,
+        pwm::{PwmChannels, C1},
         pwm_input::PwmInput,
         rcc::Rcc,
         serial,
-        stm32::{DMA2, TIM8, USART1},
+        stm32::{DMA2, TIM4, TIM8, USART1},
         timer::Timer,
     };
 
@@ -149,7 +150,7 @@ mod app {
         // obtain a reference to the GPIO* register blocks, so we can configure pins on the P* buses.
         let gpioc = ctx.device.GPIOC.split();
         let gpioa = ctx.device.GPIOA.split();
-        // let gpiob = ctx.device.GPIOB.split();
+        let gpiob = ctx.device.GPIOB.split();
 
         // Configure one of TIM8's CH1 pins, so that its attached to the peripheral.
         // We need to do this since the pins are multiplexed across multiple peripherals
@@ -160,6 +161,11 @@ mod app {
         // Note: as a side-effect TIM8's interrupt is enabled and fires whenever a capture-compare
         //      cycle is complete. See the reference manual's paragraphs on PWM Input.
         let monitor = Timer::new(ctx.device.TIM8, &clocks).pwm_input(240.hz(), tim8_cc1);
+
+        let mut pwm_mock: PwmChannels<TIM4, C1> =
+            Timer::new(ctx.device.TIM4, &clocks).pwm(gpiob.pb6.into_alternate(), 200.hz());
+        pwm_mock.set_duty(pwm_mock.get_max_duty() / 2);
+        pwm_mock.enable();
 
         /*
         begin USART1 config

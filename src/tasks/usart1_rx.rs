@@ -6,11 +6,11 @@ use stm32f4xx_hal::stm32::{DMA2, USART1};
 use crate::app::{
     on_usart1_idle, on_usart1_rx_dma, Usart1Buf, Usart1TransferRx, {BUF_SIZE, MESSAGE_SIZE},
 };
+use crate::datamodel::{request::Request, rx_errors::RxError};
 use crate::tasks::TxBufferState;
 use core::convert::TryInto;
-use stm32f4xx_hal::crc32::Crc32;
 use core::ops::Index;
-use crate::datamodel::{request::Request, rx_errors::RxError};
+use stm32f4xx_hal::crc32::Crc32;
 
 /// Handles the DMA transfer complete Interrupt
 pub(crate) fn on_usart1_rx_dma(_ctx: on_usart1_rx_dma::Context) {
@@ -22,8 +22,9 @@ pub(crate) fn on_usart1_rx_dma(_ctx: on_usart1_rx_dma::Context) {
 /// before the transfer completes (e.g. sends 12 bytes when BUF_SIZE > 12).
 pub(crate) fn on_usart1_idle(ctx: on_usart1_idle::Context) {
     rprintln!("RX line fell idle, packet recv'ed.");
+    // acquire lock to shared resources, then call the actual handler.
     (ctx.shared.recv, ctx.shared.crc).lock(|transfer: &mut Usart1TransferRx, crc: &mut Crc32| {
-            handle_rx(transfer, crc);
+        handle_rx(transfer, crc);
     });
 }
 
@@ -70,7 +71,7 @@ fn handle_rx(transfer: &mut Usart1TransferRx, crc: &mut Crc32) {
             (buf, len)
         })
     } {
-        rprintln!("something went horribly wrong in DMA reconfig!");
+        rprintln!("something went horribly wrong in DMA reconfig! {:?}", e);
         transfer.clear_interrupts();
         unsafe { clear_idle_interrupt() };
         return;
@@ -81,10 +82,13 @@ fn handle_rx(transfer: &mut Usart1TransferRx, crc: &mut Crc32) {
         rprintln!("Someone sent a bigger message frame than allowed.");
         Err(RxError::BufferOverflow)
     } else {
-            process_mabie_packet(&packet,crc )
+        process_mabie_packet(&packet, crc)
     };
     if let Err(e) = result {
-        rprintln!("[ERROR] Something went horribly wrong processing packet {:?}!", e);
+        rprintln!(
+            "[ERROR] Something went horribly wrong processing packet {:?}!",
+            e
+        );
     }
 
     transfer.clear_interrupts();
@@ -117,13 +121,15 @@ fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), RxEr
 
     let mut decoder = postcard_cobs::CobsDecoder::new(&mut buffer);
 
+    // decode the COBS frame into the buffer
     if let Ok(n) = match decoder.push(input_buffer) {
         Ok(None) => {
             rprintln!("[ERROR] Decoder demanded more bytes than we can feed it.");
             Err(RxError::CobsDecoderNeededMoreBytes)
         }
-        Ok(Some((message_length, _))) =>{
+        Ok(Some((message_length, _))) => {
             rprintln!("Decode successful, decoded {} bytes.", message_length);
+            rprintln!("un-COBS'ed := {:?}", buffer);
             Ok(message_length)
         }
         Err(j) => {
@@ -131,45 +137,78 @@ fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), RxEr
             Err(RxError::CobsDecoderError(j))
         }
     } {
-        let (data, crc_bytes) = (&buffer[..n-4], &buffer[n-4..n]);
+        // NOTE: this somehow solves an off-by-one error.
+        let n = n - 1;
+        // If decoding succeeded, then fetch the sender CRC.
+        let crc_bytes = &buffer[n - 4..n];
         rprintln!("crc buffer := {:?}", crc_bytes);
-        let sender_crc = u32::from_be_bytes(crc_bytes.try_into().expect("failed to interpret sender CRC as a u32!"));
+        let sender_crc = u32::from_be_bytes(
+            crc_bytes
+                .try_into()
+                .expect("failed to interpret sender CRC as a u32!"),
+        );
+        // Then compute the device CRC.
+        let data = &mut buffer[..n - 4];
+        rprintln!("computing sender CRC with data length {}", data.len());
         let device_crc = compute_crc(data, crc);
 
+        // Ensure the two match..
         if sender_crc != device_crc {
-            rprintln!("[ERROR] Sender CRC {} != Device CRC {}", sender_crc, device_crc);
+            rprintln!(
+                "[ERROR] Sender CRC {} != Device CRC {}",
+                sender_crc,
+                device_crc
+            );
             Err(RxError::InvalidSenderCrc)
         } else {
             rprintln!("RX checksum passed.");
-            let request_result  : serde_json_core::de::Result<(Request, usize)>=  serde_json_core::from_slice(data);
-            if let Ok((request, size))= request_result {
-                rprintln!("successfully deserialized request {:?} of size {}", request, size);
-                crate::app::write_telemetry::spawn().expect("failed to spawn telemetry writer.");
+            // Deserialize internal CBOR packet.
+            // Note: the data buffer needs to be mutable as an implementation detail of CBOR.
+            let request_result: serde_cbor::Result<Request> = serde_cbor::de::from_mut_slice(data);
+
+            // Check that the deserialization was successful.
+            if let Ok(request) = request_result {
+                rprintln!("successfully deserialized request {:?}", request);
+                // Spawn the telemetry worker
+                // Note: we remap the error here to our internal enum for consistancy.
+                crate::app::write_telemetry::spawn().map_err(|e| {
+                    rprintln!("[error] failed to spawn telemetry writer with err {:?}", e);
+                    RxError::FailedTelemetrySpawn
+                })?;
                 Ok(())
             } else {
                 rprintln!("[error] failed to deserialize well-formed packet!");
-                Err(RxError::FailedJsonDeserialize)
+                Err(RxError::FailedDeserialize)
             }
         }
     } else {
         Err(RxError::CobsDecoderPushFailed)
     }
-
-
 }
 
+/// computes the CRC-32(ethernet) of the provided data buffer.
+/// Note: this uses the CRC32 peripheral, which only operates on u32 words.
+///     For the sake of simplicity, the input buffer is truncated to the nearest word boundry,
+///     and the resulting smaller buffer is then fed to the peripheral.
 pub(crate) fn compute_crc(buffer: &[u8], crc: &mut Crc32) -> u32 {
+    // Reset the peripheral.
     crc.init();
     let payload_size = buffer.len();
-    let remainder = buffer.len() % 4;
-    let total_words = buffer.len() / 4;
+    let remainder = payload_size % 4;
+    let total_words = payload_size / 4;
     if remainder != 0 {
         rprintln!("input data (length {}) was not word-aligned, truncating to {} bytes for calculation...", buffer.len(), total_words*4)
     }
+    // truncate to the word boundry
     let buffer = &buffer[0..total_words * 4];
     let chunks = buffer.chunks_exact(4);
 
-    rprintln!("checksumming {} bytes of a {} byte payload across {} words.", buffer.len(), payload_size, chunks.len());
+    rprintln!(
+        "checksumming {} bytes of a {} byte payload across {} words.",
+        buffer.len(),
+        payload_size,
+        chunks.len()
+    );
     rprintln!("buffer := {:?}", buffer);
     let mut result: u32 = 0;
     chunks.for_each(|chunk| {
@@ -177,7 +216,6 @@ pub(crate) fn compute_crc(buffer: &[u8], crc: &mut Crc32) -> u32 {
         rprintln!("feeding word {:x}", word);
         result = crc.update(&[word])
     });
-
 
     result
 }
