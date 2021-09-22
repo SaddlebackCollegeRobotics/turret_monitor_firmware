@@ -37,7 +37,7 @@ mod app {
             StreamsTuple, Transfer,
         },
         gpio::{
-            gpioc::{PC10, PC11, PC6},
+            gpioc::{PC10, PC11, PC6, PC7},
             Alternate,
         },
         prelude::*,
@@ -61,7 +61,7 @@ mod app {
     Peripheral type definitions
      */
     /// PWM input monitor type
-    pub(crate) type PwmMonitor = PwmInput<TIM8, PC6<Alternate<3>>>;
+    pub(crate) type QeiMonitor = Qei<TIM8, (PC6<Alternate<3>>, PC7<Alternate<3>>)>;
     /// Serial connection type
     pub(crate) type Usart1Tx = serial::Tx<USART1>;
     pub(crate) type Usart1Rx = serial::Rx<USART1>;
@@ -78,11 +78,11 @@ mod app {
 
     /// Serial TX DMA type
     pub(crate) type Usart1TransferTx =
-        Transfer<Stream7<DMA2>, Usart1Tx, MemoryToPeripheral, Usart1Buf, 4>;
+    Transfer<Stream7<DMA2>, Usart1Tx, MemoryToPeripheral, Usart1Buf, 4>;
 
     /// Serial RX DMA type
     pub(crate) type Usart1TransferRx =
-        Transfer<Stream2<DMA2>, Usart1Rx, PeripheralToMemory, Usart1Buf, 4>;
+    Transfer<Stream2<DMA2>, Usart1Rx, PeripheralToMemory, Usart1Buf, 4>;
 
     /* resources shared across RTIC tasks */
     #[shared]
@@ -99,7 +99,7 @@ mod app {
     /* resources local to specific RTIC tasks */
     #[local]
     struct Local {
-        monitor: PwmMonitor,
+        monitor: QeiMonitor,
     }
 
     /*
@@ -154,18 +154,18 @@ mod app {
 
         // Configure one of TIM8's CH1 pins, so that its attached to the peripheral.
         // We need to do this since the pins are multiplexed across multiple peripherals
-        let tim8_cc1 = gpioc.pc6.into_alternate();
 
         // Configure TIM8 into PWM input mode.
         // This requires a "best guess" of the input frequency in order to be accurate.
         // Note: as a side-effect TIM8's interrupt is enabled and fires whenever a capture-compare
         //      cycle is complete. See the reference manual's paragraphs on PWM Input.
-        let monitor = Timer::new(ctx.device.TIM8, &clocks).pwm_input(240.hz(), tim8_cc1);
+
+        let monitor = Qei::new(ctx.device.TIM8, (gpioc.pc6.into_alternate(), gpioc.pc7.into_alternate()));
 
         let mut pwm_mock: PwmChannels<TIM4, C1> =
             Timer::new(ctx.device.TIM4, &clocks).pwm(gpiob.pb6.into_alternate(), 200.hz());
         pwm_mock.set_duty(pwm_mock.get_max_duty() / 2);
-        pwm_mock.enable();
+        // pwm_mock.enable();
 
         /*
         begin USART1 config
@@ -187,8 +187,8 @@ mod app {
             usart1_config,
             clocks,
         )
-        .expect("failed to configure UART4.")
-        .split();
+            .expect("failed to configure UART4.")
+            .split();
 
         // set up the DMA transfers.
         let dma2_streams: StreamsTuple<DMA2> = StreamsTuple::new(ctx.device.DMA2);
@@ -253,6 +253,7 @@ mod app {
 
     /* bring externed tasks into scope */
     use crate::tasks::{on_usart1_idle, on_usart1_rx_dma, on_usart1_txe, tim8_cc, write_telemetry};
+    use stm32f4xx_hal::qei::Qei;
 
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
     // This allows us to specify the tasks in other modules and still work within
@@ -283,7 +284,7 @@ mod app {
         fn on_usart1_rx_dma(context: on_usart1_rx_dma::Context);
         #[task(
         binds = USART1,
-        shared=[recv, crc]
+        shared = [recv, crc]
         )]
         fn on_usart1_idle(context: on_usart1_idle::Context);
     }

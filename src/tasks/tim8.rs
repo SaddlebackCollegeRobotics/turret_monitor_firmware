@@ -1,18 +1,13 @@
-use crate::app::{tim8_cc, PwmMonitor};
+use crate::app::{tim8_cc, QeiMonitor};
 use rtic::mutex_prelude::*;
+use stm32f4xx_hal::hal::Qei;
 
 pub(crate) fn tim8_cc(mut context: tim8_cc::Context) {
-    let monitor: &PwmMonitor = &context.local.monitor;
-
-    // First, check that this interrupt is a valid capture, since this interrupt
-    // fires twice per period. If not, bail out to speed up the interrupt.
-    if !monitor.is_valid_capture() {
-        return;
-    }
+    let monitor: &QeiMonitor = &context.local.monitor;
 
     // observe duty cycle
     // This is done up here to minimize time in the critical section.
-    let observation = monitor.get_duty_cycle();
+    let observation = monitor.count();
 
     // entering critical section
     context.shared.last_observed_turret_position.lock(|guard| {
