@@ -25,7 +25,6 @@ dispatchers = [SPI2, SPI3],
 mod app {
     /* bring dependencies into scope */
 
-    use crate::tasks::TxBufferState;
     use cortex_m::singleton;
     use dwt_systick_monotonic::DwtSystick;
     use rtic::time::duration::Seconds;
@@ -33,25 +32,31 @@ mod app {
     use stm32f4xx_hal::{
         crc32::Crc32,
         dma::{
-            config::DmaConfig, Channel7, MemoryToPeripheral, PeripheralToMemory, Stream2, Stream7,
+            Channel7, config::DmaConfig, MemoryToPeripheral, PeripheralToMemory, Stream2, Stream7,
             StreamsTuple, Transfer,
         },
         gpio::{
-            gpioc::{PC10, PC11, PC6, PC7},
             Alternate,
+            gpioc::{PC10, PC11, PC6, PC7},
+            gpioa::{PA1,PA8},
         },
         prelude::*,
-        pwm::{PwmChannels, C1},
+        pwm::{C1, PwmChannels},
         pwm_input::PwmInput,
         rcc::Rcc,
         serial,
-        stm32::{DMA2, TIM4, TIM8, USART1},
+        stm32::{DMA2, TIM4, TIM5, TIM8, USART1},
         timer::Timer,
     };
+    use stm32f4xx_hal::qei::Qei;
+
+    use crate::tasks::{on_usart1_idle, on_usart1_rx_dma, on_usart1_txe, write_telemetry};
+    use crate::tasks::TxBufferState;
+    use stm32f4xx_hal::gpio::gpioa::PA0;
 
     /*
-    Monotonic config
-     */
+        Monotonic config
+         */
     const MONONTONIC_FREQ: u32 = 8_000_000;
 
     #[monotonic(binds = SysTick, default = true)]
@@ -61,7 +66,7 @@ mod app {
     Peripheral type definitions
      */
     /// PWM input monitor type
-    pub(crate) type QeiMonitor = Qei<TIM8, (PC6<Alternate<3>>, PC7<Alternate<3>>)>;
+    pub(crate) type QeiMonitor = Qei<TIM5, (PA0<Alternate<2>>, PA1<Alternate<2>>)>;
     /// Serial connection type
     pub(crate) type Usart1Tx = serial::Tx<USART1>;
     pub(crate) type Usart1Rx = serial::Rx<USART1>;
@@ -69,7 +74,7 @@ mod app {
     USART DMA definitions
      */
     /// Size of USART1's DMA buffer
-    pub(crate) const BUF_SIZE: usize = 32;
+    pub(crate) const BUF_SIZE: usize = 128;
     /// Maximum message size for messages on USART1.
     pub(crate) const MESSAGE_SIZE: usize = BUF_SIZE - 1;
 
@@ -148,9 +153,9 @@ mod app {
         /* end RTIC monotonics */
 
         // obtain a reference to the GPIO* register blocks, so we can configure pins on the P* buses.
-        let gpioc = ctx.device.GPIOC.split();
         let gpioa = ctx.device.GPIOA.split();
         let gpiob = ctx.device.GPIOB.split();
+        // let gpioc = ctx.device.GPIOC.split();
 
         // Configure one of TIM8's CH1 pins, so that its attached to the peripheral.
         // We need to do this since the pins are multiplexed across multiple peripherals
@@ -160,7 +165,7 @@ mod app {
         // Note: as a side-effect TIM8's interrupt is enabled and fires whenever a capture-compare
         //      cycle is complete. See the reference manual's paragraphs on PWM Input.
 
-        let monitor = Qei::new(ctx.device.TIM8, (gpioc.pc6.into_alternate(), gpioc.pc7.into_alternate()));
+        let monitor = Qei::new(ctx.device.TIM5, (gpioa.pa0.into_alternate(), gpioa.pa1.into_alternate()));
 
         let mut pwm_mock: PwmChannels<TIM4, C1> =
             Timer::new(ctx.device.TIM4, &clocks).pwm(gpiob.pb6.into_alternate(), 200.hz());
@@ -252,20 +257,14 @@ mod app {
     }
 
     /* bring externed tasks into scope */
-    use crate::tasks::{on_usart1_idle, on_usart1_rx_dma, on_usart1_txe, tim8_cc, write_telemetry};
-    use stm32f4xx_hal::qei::Qei;
-
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
     // This allows us to specify the tasks in other modules and still work within
     // RTIC's infrastructure.
     extern "Rust" {
-        // PWM Monitor interrupt handler
-        #[task(binds = TIM8_CC, local = [monitor], shared = [last_observed_turret_position])]
-        fn tim8_cc(context: tim8_cc::Context);
-
         // periodic UART telemetry output task
         #[task(
-        shared = [last_observed_turret_position, send, crc]
+        shared = [last_observed_turret_position, send, crc],
+        local = [monitor]
         )]
         fn write_telemetry(context: write_telemetry::Context);
 

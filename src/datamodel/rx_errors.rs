@@ -7,6 +7,6 @@ pub enum RxError {
     FailedTelemetrySpawn,
     FailedDeserialize,
     BufferOverflow,
-    DmaReconfigFailed,
-    DmaTransferFailed,
+    // DmaReconfigFailed,
+    // DmaTransferFailed,
 }
