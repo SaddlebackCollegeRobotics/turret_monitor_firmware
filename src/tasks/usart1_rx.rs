@@ -217,5 +217,7 @@ pub(crate) fn compute_crc(buffer: &[u8], crc: &mut Crc32) -> u32 {
         result = crc.update(&[word])
     });
 
+    rprintln!("computed CRC := {}", result);
+
     result
 }

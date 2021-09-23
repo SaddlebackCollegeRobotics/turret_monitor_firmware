@@ -6,9 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_cbor::ser::{Serializer, SliceWrite};
 use stm32f4xx_hal::{crc32::Crc32, prelude::*};
 
-use crate::app::{Usart1Buf, Usart1TransferTx, Usart1Tx, BUF_SIZE, MESSAGE_SIZE};
-use crate::datamodel::telemetry_packet::TurretTelemetryPacket;
+use crate::app::{Usart1Buf, Usart1TransferTx, Usart1Tx, BUF_SIZE, MESSAGE_SIZE, QeiMonitor};
+use crate::datamodel::telemetry_packet::{TurretTelemetryPacket,TurretDirection };
 use crate::tasks::usart1_rx::compute_crc;
+use stm32f4xx_hal::hal::Direction;
 
 pub enum TxBufferState {
     // Ready, use the contained buffer for next transfer
@@ -28,14 +29,8 @@ pub(crate) fn write_telemetry(
     /*
         entering critical section
     */
-    let turret_position: f32 = context
-        .shared
-        .last_observed_turret_position
-        .lock(|guard| *guard);
+    let monitor: &mut QeiMonitor = context.local.monitor;
 
-    /*
-        leaving critical section
-    */
     // retrieve the DMA state
     let dma_state: TxBufferState = context
         .shared
@@ -47,7 +42,11 @@ pub(crate) fn write_telemetry(
     let mut payload_buffer: [u8; BUF_SIZE] = [0xFF; BUF_SIZE];
     // define the response
     let payload = TurretTelemetryPacket {
-        turret_pos: turret_position,
+        turret_pos: monitor.count() as u32,
+        turret_rot: match monitor.direction() {
+            Direction::Downcounting => {TurretDirection::Backward}
+            Direction::Upcounting => {TurretDirection::Forward}
+        },
     };
     // set up serialization
     let mut serializer = Serializer::new(SliceWrite::new(&mut payload_buffer));
@@ -66,6 +65,7 @@ pub(crate) fn write_telemetry(
         return;
     }
 
+    rprintln!("computing checksum for payload_size := {}", payload_size);
     /*
     entering critical section
      */
@@ -73,10 +73,10 @@ pub(crate) fn write_telemetry(
         .shared
         .crc
         .lock(|crc: &mut Crc32| compute_crc(&payload_buffer[..payload_size], crc));
-    rprintln!("CRC := {}", checksum);
     /*
     exiting critical section
      */
+    rprintln!("sender CRC := {}", checksum);
 
     // append the CRC32 to the end.
     payload_buffer[payload_size..payload_size + 4].copy_from_slice(&checksum.to_be_bytes());
@@ -89,7 +89,8 @@ pub(crate) fn write_telemetry(
         //   - we are in single-buffer mode so this is safe.
         unsafe {
             // We re-use the existing DMA buffer, since the buffer has to live for 'static
-            // in order to be safe. This was ensured during creation of the Transfer object.
+            // in order to be safe. This was ensured during creation of the Transfer object,
+            // so this is safe.
             tx.next_transfer_with(|buf, _| {
                 // populate the DMA buffer with the new buffer's content
                 postcard_cobs::encode(&payload_buffer[0..payload_size + 4], buf);
@@ -106,4 +107,5 @@ pub(crate) fn write_telemetry(
     } else {
         rprintln!("[WARNING] write_Telemetry called but a previous USART1 DMA was still active!");
     };
+    rprintln!("TX scheduled.");
 }

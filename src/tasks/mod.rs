@@ -13,13 +13,9 @@ mod usart1_tx;
 /// Note: this task requires a monotonic clock with at least 1s resolution.
 mod write_telemetry;
 
-/// Task handling reading the PWM input using advanced timer TIM8.
-mod tim8;
-
 /*
     public(crate) interface
 */
-pub(crate) use tim8::tim8_cc;
 pub(crate) use usart1_rx::{
     clear_idle_interrupt, enable_idle_interrupt, on_usart1_idle, on_usart1_rx_dma,
 };

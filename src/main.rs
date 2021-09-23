@@ -25,7 +25,6 @@ dispatchers = [SPI2, SPI3],
 mod app {
     /* bring dependencies into scope */
 
-    use crate::tasks::TxBufferState;
     use cortex_m::singleton;
     use dwt_systick_monotonic::DwtSystick;
     use rtic::time::duration::Seconds;
@@ -33,25 +32,31 @@ mod app {
     use stm32f4xx_hal::{
         crc32::Crc32,
         dma::{
-            config::DmaConfig, Channel7, MemoryToPeripheral, PeripheralToMemory, Stream2, Stream7,
+            Channel7, config::DmaConfig, MemoryToPeripheral, PeripheralToMemory, Stream2, Stream7,
             StreamsTuple, Transfer,
         },
         gpio::{
-            gpioc::{PC10, PC11, PC6},
             Alternate,
+            gpioc::{PC10, PC11, PC6, PC7},
+            gpioa::{PA1, PA8},
         },
         prelude::*,
-        pwm::{PwmChannels, C1},
+        pwm::{C1, C2, PwmChannels},
         pwm_input::PwmInput,
         rcc::Rcc,
         serial,
-        stm32::{DMA2, TIM4, TIM8, USART1},
+        stm32::{DMA2, TIM4, TIM5, TIM8, USART1, TIM1},
         timer::Timer,
     };
+    use stm32f4xx_hal::qei::Qei;
+
+    use crate::tasks::{on_usart1_idle, on_usart1_rx_dma, on_usart1_txe, write_telemetry};
+    use crate::tasks::TxBufferState;
+    use stm32f4xx_hal::gpio::gpioa::PA0;
 
     /*
-    Monotonic config
-     */
+        Monotonic config
+         */
     const MONONTONIC_FREQ: u32 = 8_000_000;
 
     #[monotonic(binds = SysTick, default = true)]
@@ -61,7 +66,7 @@ mod app {
     Peripheral type definitions
      */
     /// PWM input monitor type
-    pub(crate) type PwmMonitor = PwmInput<TIM8, PC6<Alternate<3>>>;
+    pub(crate) type QeiMonitor = Qei<TIM5, (PA0<Alternate<2>>, PA1<Alternate<2>>)>;
     /// Serial connection type
     pub(crate) type Usart1Tx = serial::Tx<USART1>;
     pub(crate) type Usart1Rx = serial::Rx<USART1>;
@@ -69,7 +74,7 @@ mod app {
     USART DMA definitions
      */
     /// Size of USART1's DMA buffer
-    pub(crate) const BUF_SIZE: usize = 32;
+    pub(crate) const BUF_SIZE: usize = 128;
     /// Maximum message size for messages on USART1.
     pub(crate) const MESSAGE_SIZE: usize = BUF_SIZE - 1;
 
@@ -78,11 +83,11 @@ mod app {
 
     /// Serial TX DMA type
     pub(crate) type Usart1TransferTx =
-        Transfer<Stream7<DMA2>, Usart1Tx, MemoryToPeripheral, Usart1Buf, 4>;
+    Transfer<Stream7<DMA2>, Usart1Tx, MemoryToPeripheral, Usart1Buf, 4>;
 
     /// Serial RX DMA type
     pub(crate) type Usart1TransferRx =
-        Transfer<Stream2<DMA2>, Usart1Rx, PeripheralToMemory, Usart1Buf, 4>;
+    Transfer<Stream2<DMA2>, Usart1Rx, PeripheralToMemory, Usart1Buf, 4>;
 
     /* resources shared across RTIC tasks */
     #[shared]
@@ -99,7 +104,7 @@ mod app {
     /* resources local to specific RTIC tasks */
     #[local]
     struct Local {
-        monitor: PwmMonitor,
+        monitor: QeiMonitor,
     }
 
     /*
@@ -148,24 +153,20 @@ mod app {
         /* end RTIC monotonics */
 
         // obtain a reference to the GPIO* register blocks, so we can configure pins on the P* buses.
-        let gpioc = ctx.device.GPIOC.split();
         let gpioa = ctx.device.GPIOA.split();
         let gpiob = ctx.device.GPIOB.split();
+        // let gpioc = ctx.device.GPIOC.split();
 
         // Configure one of TIM8's CH1 pins, so that its attached to the peripheral.
         // We need to do this since the pins are multiplexed across multiple peripherals
-        let tim8_cc1 = gpioc.pc6.into_alternate();
 
         // Configure TIM8 into PWM input mode.
         // This requires a "best guess" of the input frequency in order to be accurate.
         // Note: as a side-effect TIM8's interrupt is enabled and fires whenever a capture-compare
         //      cycle is complete. See the reference manual's paragraphs on PWM Input.
-        let monitor = Timer::new(ctx.device.TIM8, &clocks).pwm_input(240.hz(), tim8_cc1);
 
-        let mut pwm_mock: PwmChannels<TIM4, C1> =
-            Timer::new(ctx.device.TIM4, &clocks).pwm(gpiob.pb6.into_alternate(), 200.hz());
-        pwm_mock.set_duty(pwm_mock.get_max_duty() / 2);
-        pwm_mock.enable();
+        let monitor = Qei::new(ctx.device.TIM5, (gpioa.pa0.into_alternate(), gpioa.pa1.into_alternate()));
+
 
         /*
         begin USART1 config
@@ -187,8 +188,8 @@ mod app {
             usart1_config,
             clocks,
         )
-        .expect("failed to configure UART4.")
-        .split();
+            .expect("failed to configure UART4.")
+            .split();
 
         // set up the DMA transfers.
         let dma2_streams: StreamsTuple<DMA2> = StreamsTuple::new(ctx.device.DMA2);
@@ -252,19 +253,14 @@ mod app {
     }
 
     /* bring externed tasks into scope */
-    use crate::tasks::{on_usart1_idle, on_usart1_rx_dma, on_usart1_txe, tim8_cc, write_telemetry};
-
     // RTIC docs specify we can modularize the code by using these `extern` blocks.
     // This allows us to specify the tasks in other modules and still work within
     // RTIC's infrastructure.
     extern "Rust" {
-        // PWM Monitor interrupt handler
-        #[task(binds = TIM8_CC, local = [monitor], shared = [last_observed_turret_position])]
-        fn tim8_cc(context: tim8_cc::Context);
-
         // periodic UART telemetry output task
         #[task(
-        shared = [last_observed_turret_position, send, crc]
+        shared = [last_observed_turret_position, send, crc],
+        local = [monitor]
         )]
         fn write_telemetry(context: write_telemetry::Context);
 
@@ -283,7 +279,7 @@ mod app {
         fn on_usart1_rx_dma(context: on_usart1_rx_dma::Context);
         #[task(
         binds = USART1,
-        shared=[recv, crc]
+        shared = [recv, crc]
         )]
         fn on_usart1_idle(context: on_usart1_idle::Context);
     }
