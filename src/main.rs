@@ -74,7 +74,7 @@ mod app {
     USART DMA definitions
      */
     /// Size of USART1's DMA buffer
-    pub(crate) const BUF_SIZE: usize = 128;
+    pub(crate) const BUF_SIZE: usize = 64;
     /// Maximum message size for messages on USART1.
     pub(crate) const MESSAGE_SIZE: usize = BUF_SIZE - 1;
 
@@ -132,9 +132,8 @@ mod app {
             w.dbg_standby().set_bit();
             w.dbg_stop().set_bit()
         });
-
-        // Enable RTT logging
-        rtt_init_print!();
+        // Enable RTT logging;
+        rtt_init_print!(NoBlockSkip, 2048);
         rprintln!("hello, world!");
 
         // retrieve the RCC register, which is needed to obtain a handle to the clocks
@@ -207,7 +206,6 @@ mod app {
             .transfer_error_interrupt(true)
             .direct_mode_error_interrupt(true)
             .memory_increment(true);
-
         let usart1_dma_transfer_tx: Usart1TransferTx = Transfer::init_memory_to_peripheral(
             dma2_streams.7,
             usart1_tx,
