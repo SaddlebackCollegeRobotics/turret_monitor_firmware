@@ -7,7 +7,7 @@ use serde_cbor::ser::{Serializer, SliceWrite};
 use stm32f4xx_hal::{crc32::Crc32, prelude::*};
 
 use crate::app::{Usart1Buf, Usart1TransferTx, Usart1Tx, BUF_SIZE, MESSAGE_SIZE, QeiMonitor};
-use crate::datamodel::telemetry_packet::{TurretTelemetryPacket,TurretDirection };
+use crate::datamodel::telemetry_packet::{TurretTelemetryPacket, TurretDirection};
 use crate::tasks::usart1_rx::compute_crc;
 use stm32f4xx_hal::hal::Direction;
 
@@ -39,13 +39,14 @@ pub(crate) fn write_telemetry(
         .expect("failed to aquire buffer state");
 
     // declare a buffer to fit the response in
-    let mut payload_buffer: [u8; BUF_SIZE] = [0xFF; BUF_SIZE];
+    let mut payload_buffer: [u8; BUF_SIZE] = [0x00; BUF_SIZE];
+    let mut cobs_payload_buffer: [u8; BUF_SIZE] = [0x00; BUF_SIZE];
     // define the response
     let payload = TurretTelemetryPacket {
         turret_pos: monitor.count() as u32,
         turret_rot: match monitor.direction() {
-            Direction::Downcounting => {TurretDirection::Backward}
-            Direction::Upcounting => {TurretDirection::Forward}
+            Direction::Downcounting => { TurretDirection::Backward }
+            Direction::Upcounting => { TurretDirection::Forward }
         },
     };
     // set up serialization
@@ -58,10 +59,10 @@ pub(crate) fn write_telemetry(
     //
     let payload_size = serializer.into_inner().bytes_written();
 
-    rprintln!("payload  before CRC := {:?}", payload_buffer);
+    rprintln!("payload  before CRC := {:?}", &payload_buffer[..payload_size]);
     // sanity check.
     if payload_size > MESSAGE_SIZE - 4 {
-        rprintln!("Encoded payload is too big! need at least 4 bytes to fit the CRC32!");
+        rprintln!("Encoded payload is too big({:?})! need at least 4 bytes to fit the CRC32!", payload_size);
         return;
     }
 
@@ -76,7 +77,7 @@ pub(crate) fn write_telemetry(
     /*
     exiting critical section
      */
-    rprintln!("sender CRC := {}", checksum);
+    rprintln!("TX sender CRC := {}", checksum);
 
     // append the CRC32 to the end.
     payload_buffer[payload_size..payload_size + 4].copy_from_slice(&checksum.to_be_bytes());
@@ -104,6 +105,7 @@ pub(crate) fn write_telemetry(
         }
         // update the DMA state into the running phase
         *context.shared.send = Some(TxBufferState::Running(tx));
+        rprintln!("TX scheduled.");
     } else {
         *context.shared.send = Some(dma_state);
         rprintln!("[WARNING] write_Telemetry called but a previous USART1 DMA was still active!");
