@@ -38,14 +38,14 @@ mod app {
         gpio::{
             Alternate,
             gpioc::{PC10, PC11, PC6, PC7},
-            gpioa::{PA1,PA8},
+            gpioa::{PA1, PA8},
         },
         prelude::*,
-        pwm::{C1, PwmChannels},
+        pwm::{C1, C2, PwmChannels},
         pwm_input::PwmInput,
         rcc::Rcc,
         serial,
-        stm32::{DMA2, TIM4, TIM5, TIM8, USART1},
+        stm32::{DMA2, TIM4, TIM5, TIM8, USART1, TIM1},
         timer::Timer,
     };
     use stm32f4xx_hal::qei::Qei;
@@ -167,10 +167,6 @@ mod app {
 
         let monitor = Qei::new(ctx.device.TIM5, (gpioa.pa0.into_alternate(), gpioa.pa1.into_alternate()));
 
-        let mut pwm_mock: PwmChannels<TIM4, C1> =
-            Timer::new(ctx.device.TIM4, &clocks).pwm(gpiob.pb6.into_alternate(), 200.hz());
-        pwm_mock.set_duty(pwm_mock.get_max_duty() / 2);
-        // pwm_mock.enable();
 
         /*
         begin USART1 config
