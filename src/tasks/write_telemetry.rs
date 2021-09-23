@@ -105,6 +105,7 @@ pub(crate) fn write_telemetry(
         // update the DMA state into the running phase
         *context.shared.send = Some(TxBufferState::Running(tx));
     } else {
+        *context.shared.send = Some(dma_state);
         rprintln!("[WARNING] write_Telemetry called but a previous USART1 DMA was still active!");
     };
     rprintln!("TX scheduled.");
