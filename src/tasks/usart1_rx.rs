@@ -137,6 +137,9 @@ fn process_mabie_packet(input_buffer: &[u8], crc: &mut Crc32) -> Result<(), RxEr
             Err(RxError::CobsDecoderError(j))
         }
     } {
+        if n<5{
+            return Err(RxError::CobsDecoderNeededMoreBytes)
+        };
         // NOTE: this somehow solves an off-by-one error.
         let n = n - 1;
         // If decoding succeeded, then fetch the sender CRC.
