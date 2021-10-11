@@ -36,9 +36,9 @@ mod app {
             StreamsTuple, Transfer,
         },
         gpio::{
-            Alternate,
+            Alternate, Output,
             gpioc::{PC10, PC11, PC6, PC7},
-            gpioa::{PA1, PA8},
+            gpioa::{PA1, PA8, PA4},
         },
         prelude::*,
         pwm::{C1, C2, PwmChannels},
@@ -47,6 +47,8 @@ mod app {
         serial,
         stm32::{DMA2, TIM4, TIM5, TIM8, USART1, TIM1},
         timer::Timer,
+        dac,
+        dac::DacPin,
     };
     use stm32f4xx_hal::qei::Qei;
 
@@ -70,6 +72,7 @@ mod app {
     /// Serial connection type
     pub(crate) type Usart1Tx = serial::Tx<USART1>;
     pub(crate) type Usart1Rx = serial::Rx<USART1>;
+    pub(crate) type DacC1 = dac::C1;
     /*
     USART DMA definitions
      */
@@ -234,6 +237,14 @@ mod app {
 
         // set up the CRC32 (ethernet) peripheral
         let crc = Crc32::new(ctx.device.CRC);
+
+        /*
+        Start DAC configuration
+         */
+
+        let pa4 = gpioa.pa4.into_analog();
+        let (mut dac_ch1) = dac::dac(ctx.device.DAC, (pa4));
+        dac_ch1.enable();
 
         // kick off the periodic task.
         write_telemetry::spawn_after(Seconds(1u32)).expect("failed to kick off periodic task.");
