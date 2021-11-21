@@ -1,7 +1,7 @@
 use rtic::mutex_prelude::*;
 use rtt_target::rprintln;
 use stm32f4xx_hal::dma::{traits::*, Stream2};
-use stm32f4xx_hal::stm32::{DMA2, USART1};
+use stm32f4xx_hal::pac::{DMA2, USART1};
 
 use crate::app::{
     on_usart1_idle, on_usart1_rx_dma, Usart1Buf, Usart1TransferRx, {BUF_SIZE, MESSAGE_SIZE},

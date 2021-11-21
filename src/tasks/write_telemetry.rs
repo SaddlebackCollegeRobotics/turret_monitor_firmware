@@ -40,7 +40,6 @@ pub(crate) fn write_telemetry(
 
     // declare a buffer to fit the response in
     let mut payload_buffer: [u8; BUF_SIZE] = [0x00; BUF_SIZE];
-    let mut cobs_payload_buffer: [u8; BUF_SIZE] = [0x00; BUF_SIZE];
     // define the response
     let payload = TurretTelemetryPacket {
         turret_pos: monitor.count() as u32,

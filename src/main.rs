@@ -18,7 +18,7 @@ mod tasks;
   - this is done via the `dispatchers` argument
 */
 #[rtic::app(
-device = stm32f4xx_hal::stm32,
+device = stm32f4xx_hal::pac,
 peripherals = true,
 dispatchers = [SPI2, SPI3],
 )]
@@ -45,10 +45,10 @@ mod app {
         pwm_input::PwmInput,
         rcc::Rcc,
         serial,
-        stm32::{DMA2, TIM4, TIM5, TIM8, USART1, TIM1},
+        pac::{DMA2, TIM4, TIM5, TIM8, USART1, TIM1},
         timer::Timer,
         dac,
-        dac::DacPin,
+        dac::{DacPin, DacOut},
     };
     use stm32f4xx_hal::qei::Qei;
 
@@ -102,6 +102,7 @@ mod app {
         send: Option<TxBufferState>,
         crc: Crc32,
         recv: Usart1TransferRx,
+        dac: DacC1,
     }
 
     /* resources local to specific RTIC tasks */
@@ -168,7 +169,6 @@ mod app {
         //      cycle is complete. See the reference manual's paragraphs on PWM Input.
 
         let monitor = Qei::new(ctx.device.TIM5, (gpioa.pa0.into_alternate(), gpioa.pa1.into_alternate()));
-
 
         /*
         begin USART1 config
@@ -245,6 +245,9 @@ mod app {
         let pa4 = gpioa.pa4.into_analog();
         let (mut dac_ch1) = dac::dac(ctx.device.DAC, (pa4));
         dac_ch1.enable();
+        // loop{
+            dac_ch1.set_value(u16::MAX/4*2);
+        // }
 
         // kick off the periodic task.
         write_telemetry::spawn_after(Seconds(1u32)).expect("failed to kick off periodic task.");
@@ -255,6 +258,7 @@ mod app {
                 send: Some(TxBufferState::Idle(usart1_dma_transfer_tx)),
                 crc,
                 recv: usart1_dma_transfer_rx,
+                dac: dac_ch1,
             },
             Local { monitor },
             init::Monotonics(mono),
